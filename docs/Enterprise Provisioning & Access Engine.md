@@ -271,7 +271,7 @@ The `handleMessage()` method in `EventMessageHandler` is a **sequential validati
 isEventValid() → isExpiredEvent() → isRateLimited() → canAcceptEvent()
 → isBlockedByRequestToVanish() → isUserAdmitted() → checkNip05Verification()
 → strategyFactory → strategy.execute()
-``` [1-cite-7](#1-cite-7) 
+```
 
 NIP-70 says: if an event has a `["-"]` tag, only accept it if the socket is authenticated as the event's author. This is purely a **validation concern** — it doesn't change how the event is stored or broadcast. It just adds one more guard clause to the chain.
 

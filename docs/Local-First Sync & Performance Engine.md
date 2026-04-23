@@ -159,7 +159,7 @@ graph TD
     W1 <-->|"IPC messages"| A
     W2 <-->|"IPC messages"| A
     SM <-->|"IPC messages"| A
-``` [1-cite-0](#1-cite-0) 
+```
 
 ### The event lifecycle (inbound)
 

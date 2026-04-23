@@ -64,7 +64,7 @@ export interface MulticastSettings {
   port?: number     // e.g. 5400
   ttl?: number      // multicast TTL, default 1 (LAN only)
 }
-``` [0-cite-14](#0-cite-14) 
+```
 
 **f) IPC integration** — When the multicast worker receives a valid event, it should `process.send()` a broadcast message so client workers push it to connected WebSocket clients, exactly like `StaticMirroringWorker` does: [0-cite-15](#0-cite-15) 
 

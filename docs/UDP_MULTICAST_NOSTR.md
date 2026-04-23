@@ -23,7 +23,7 @@ Run:
 node scripts/udp-nostr-multicast.js
 ```
 
-Use this when you want a quick yes/no check that multicast loopback works on the current host.
+this one can be used when we want a quick yes/no check that multicast loopback works on the current host.
 
 ### 2) Enhanced: `udp-nostr-multicast-enhanced.js`
 

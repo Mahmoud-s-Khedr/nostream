@@ -288,6 +288,32 @@ describe('EventRepository', () => {
         })
       })
 
+      describe('search', () => {
+        it('adds ranked full-text search ordering and default spam exclusion', () => {
+          const filters = [{ search: 'best nostr apps' }]
+
+          const query = repository.findByFilters(filters).toString()
+
+          expect(query).to.include("left join \"event_search_metadata\"")
+          expect(query).to.include("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', 'best nostr apps')")
+          expect(query).to.include('"event_search_metadata"."is_spam" = false')
+          expect(query).to.include('order by "search_rank" desc, "event_created_at" desc, "event_id" asc')
+        })
+
+        it('applies extension filters for domain/language/sentiment/nsfw/include:spam', () => {
+          const filters = [{ search: 'hello domain:example.com language:en sentiment:positive nsfw:false include:spam' }]
+
+          const query = repository.findByFilters(filters).toString()
+
+          expect(query).to.include("left join \"nip05_verifications\"")
+          expect(query).to.include('"nip05_verifications"."domain" = \'example.com\'')
+          expect(query).to.include('"event_search_metadata"."language" = \'en\'')
+          expect(query).to.include('"event_search_metadata"."sentiment" = \'positive\'')
+          expect(query).to.include('"event_search_metadata"."nsfw" = false')
+          expect(query).to.not.include('"event_search_metadata"."is_spam" = false')
+        })
+      })
+
       describe('#e', () => {
         it('selects no events given empty list of #e tags', () => {
           const filters = [{ '#e': [] }]
@@ -511,6 +537,20 @@ describe('EventRepository', () => {
       expect(sql).to.include('left join "event_tags"')
       expect(sql).to.include('event_tags.tag_name')
       expect(sql).to.include('event_tags.tag_value')
+    })
+
+    it('joins search metadata for search filters', async () => {
+      const fromStub = sandbox.stub(rrDbClient, 'from').returns({
+        countDistinct: () => ({
+          first: async () => ({ count: '1' }),
+        }),
+      } as any)
+
+      await repository.countByFilters([{ search: 'nostr apps' } as any])
+
+      const sql = fromStub.firstCall.args[0].toString()
+      expect(sql).to.include('left join "event_search_metadata"')
+      expect(sql).to.include("websearch_to_tsquery('simple', 'nostr apps')")
     })
 
     it('applies limit ordering when a filter includes limit', async () => {

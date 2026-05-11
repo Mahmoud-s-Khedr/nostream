@@ -19,6 +19,7 @@ describe('NIP-01', () => {
         '#e': ['aa', 'bb', 'cc'],
         '#p': ['dd', 'ee', 'ff'],
         '#r': ['00', '11', '22'],
+        search: 'best nostr apps',
       }
     })
 
@@ -108,6 +109,7 @@ describe('NIP-01', () => {
         { message: 'must be greater than or equal to 0', transform: assocPath(['limit'], -1) },
         { message: 'must be a multiple of 1', transform: assocPath(['limit'], Math.PI) },
       ],
+      search: [{ message: 'must be a string', transform: assocPath(['search'], 123 as any) }],
       '#e': [{ message: 'must be an array', transform: assocPath(['#e'], null) }],
       '#e[0]': [
         {

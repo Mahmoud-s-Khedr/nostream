@@ -42,6 +42,7 @@ import { toBuffer, toJSON } from '../utils/transform'
 import { createLogger } from '../factories/logger-factory'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from '../utils/filter'
 import { SubscriptionFilter } from '../@types/subscription'
+import { parseSearchQuery } from '../utils/search-query'
 
 const even = pipe(modulo(__, 2), equals(0))
 
@@ -72,12 +73,23 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events')
 
-      const isTagQuery = this.applyFilterConditions(builder, currentFilter)
+      const { isTagQuery, isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
-        builder.limit(currentFilter.limit).orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        builder.limit(currentFilter.limit)
       } else {
-        builder.limit(DEFAULT_FILTER_LIMIT).orderBy('event_created_at', 'asc').orderBy('event_id', 'asc')
+        builder.limit(DEFAULT_FILTER_LIMIT)
+      }
+
+      if (isSearchQuery) {
+        builder
+          .orderBy('search_rank', 'desc')
+          .orderBy('event_created_at', 'desc')
+          .orderBy('event_id', 'asc')
+      } else if (typeof currentFilter.limit === 'number') {
+        builder.orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+      } else {
+        builder.orderBy('event_created_at', 'asc').orderBy('event_id', 'asc')
       }
 
       if (isTagQuery) {
@@ -107,7 +119,7 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events').select('events.event_id')
 
-      const isTagQuery = this.applyFilterConditions(builder, currentFilter)
+      const { isTagQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
         builder.limit(currentFilter.limit).orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
@@ -134,7 +146,7 @@ export class EventRepository implements IEventRepository {
     return Number(result?.count ?? 0)
   }
 
-  private applyFilterConditions(builder: any, currentFilter: SubscriptionFilter): boolean {
+  private applyFilterConditions(builder: any, currentFilter: SubscriptionFilter): { isTagQuery: boolean; isSearchQuery: boolean } {
     forEachObjIndexed((tableFields: string[], filterName: string | number) => {
       builder.andWhere((bd) => {
         cond([
@@ -218,7 +230,58 @@ export class EventRepository implements IEventRepository {
       builder.leftJoin('event_tags', 'events.event_id', 'event_tags.event_id')
     }
 
-    return isTagQuery
+    const isSearchQuery = this.applySearchConditions(builder, currentFilter)
+
+    return { isTagQuery, isSearchQuery }
+  }
+
+  private applySearchConditions(builder: any, currentFilter: SubscriptionFilter): boolean {
+    if (typeof currentFilter.search !== 'string' || !currentFilter.search.trim()) {
+      return false
+    }
+
+    const parsed = parseSearchQuery(currentFilter.search)
+    const textQuery = parsed.text
+
+    builder.leftJoin('event_search_metadata', 'events.event_id', 'event_search_metadata.event_id')
+
+    if (parsed.extensions.domain) {
+      builder
+        .leftJoin('nip05_verifications', 'events.event_pubkey', 'nip05_verifications.pubkey')
+        .where('nip05_verifications.is_verified', true)
+        .andWhere('nip05_verifications.domain', parsed.extensions.domain)
+    }
+
+    if (parsed.extensions.language) {
+      builder.andWhere('event_search_metadata.language', parsed.extensions.language)
+    }
+
+    if (parsed.extensions.sentiment) {
+      builder.andWhere('event_search_metadata.sentiment', parsed.extensions.sentiment)
+    }
+
+    if (typeof parsed.extensions.nsfw === 'boolean') {
+      builder.andWhere('event_search_metadata.nsfw', parsed.extensions.nsfw)
+    }
+
+    if (!parsed.extensions.includeSpam) {
+      builder.andWhere('event_search_metadata.is_spam', false)
+    }
+
+    if (textQuery.length) {
+      builder
+        .andWhereRaw("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', ?)", [textQuery])
+        .select(
+          this.readReplicaDbClient.raw(
+            "ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?)) as search_rank",
+            [textQuery],
+          ),
+        )
+    } else {
+      builder.select(this.readReplicaDbClient.raw('1.0 as search_rank'))
+    }
+
+    return true
   }
 
   public async create(event: Event): Promise<number> {

@@ -10,14 +10,16 @@ import { IRunnable } from '../@types/base'
 
 import { createLogger } from '../factories/logger-factory'
 import { delayMs } from '../utils/misc'
-import { INip05VerificationRepository } from '../@types/repositories'
+import { INip05VerificationRepository, ISearchMetadataRepository } from '../@types/repositories'
 import { InvoiceStatus } from '../@types/invoice'
 import { isExpiredInvoice } from '../utils/invoice'
 import { Nip05Verification } from '../@types/nip05'
 import { Settings } from '../@types/settings'
+import { classifySearchMetadata } from '../utils/search-classifier'
 
 const UPDATE_INVOICE_INTERVAL = 60000
 const NIP05_REVERIFICATION_BATCH_SIZE = 50
+const SEARCH_CLASSIFICATION_BATCH_SIZE = 200
 const CLEAR_OLD_EVENTS_TIMEOUT_MS = 5000
 
 const logger = createLogger('maintenance-worker')
@@ -80,6 +82,7 @@ export class MaintenanceWorker implements IRunnable {
     private readonly maintenanceService: IMaintenanceService,
     private readonly settings: () => Settings,
     private readonly nip05VerificationRepository: INip05VerificationRepository,
+    private readonly searchMetadataRepository: ISearchMetadataRepository,
   ) {
     this.process
       .on('SIGINT', this.onExit.bind(this))
@@ -125,6 +128,7 @@ export class MaintenanceWorker implements IRunnable {
     const clearOldEventsPromise = this.clearOldEventsSafely()
 
     await this.processNip05Reverifications(currentSettings)
+    await this.processSearchClassification()
 
     if (!path(['payments', 'enabled'], currentSettings)) {
       await clearOldEventsPromise
@@ -225,6 +229,22 @@ export class MaintenanceWorker implements IRunnable {
       }
     } catch (error) {
       logger('NIP-05 re-verification batch failed: %o', error)
+    }
+  }
+
+  private async processSearchClassification(): Promise<void> {
+    try {
+      const unclassified = await this.searchMetadataRepository.findUnclassifiedEvents(SEARCH_CLASSIFICATION_BATCH_SIZE)
+      if (!unclassified.length) {
+        return
+      }
+
+      logger('found %d events pending search classification', unclassified.length)
+
+      const metadata = unclassified.map((event) => classifySearchMetadata(event.eventId, event.content))
+      await this.searchMetadataRepository.upsertMany(metadata)
+    } catch (error) {
+      logger('search classification batch failed: %o', error)
     }
   }
 

@@ -63,8 +63,27 @@ NIPs with a relay-specific implementation are listed here.
 - [x] NIP-40: Expiration Timestamp
 - [x] NIP-44: Encrypted Payloads (Versioned)
 - [x] NIP-45: Event Counts
+- [x] NIP-50: Search Capability
 - [x] NIP-62: Request to Vanish
 - [x] NIP-65: Relay List Metadata
+
+### NIP-50 Search
+
+This relay supports `search` in `REQ` filters:
+
+```json
+["REQ", "sub-id", { "kinds": [1], "search": "best nostr apps language:en sentiment:positive nsfw:false" }]
+```
+
+Supported extensions in the search query string:
+- `include:spam`
+- `domain:<domain>`
+- `language:<iso-639-1>`
+- `sentiment:<negative|neutral|positive>`
+- `nsfw:<true|false>`
+
+Search results are ranked by relevance score (not `created_at`) and `limit` is applied after ranking.  
+Search metadata (`language`, `sentiment`, `nsfw`, `is_spam`) is classified asynchronously, so freshly published events may take a short time to appear in search.
 
 ## Requirements
 

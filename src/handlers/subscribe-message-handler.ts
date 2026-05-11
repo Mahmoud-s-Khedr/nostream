@@ -98,10 +98,18 @@ export class SubscribeMessageHandler implements IMessageHandler, IAbortable {
   private canSubscribe(subscriptionId: SubscriptionId, filters: SubscriptionFilter[]): string | undefined {
     const subscriptions = this.webSocket.getSubscriptions()
     const existingSubscription = subscriptions.get(subscriptionId)
-    const subscriptionLimits = this.settings().limits?.client?.subscription
+    const currentSettings = this.settings()
+    const subscriptionLimits = currentSettings.limits?.client?.subscription
 
     if (existingSubscription?.length && equals(filters, existingSubscription)) {
       return `Duplicate subscription ${subscriptionId}: Ignoring`
+    }
+
+    if (
+      (currentSettings.nip50?.enabled ?? true) === false &&
+      filters.some((filter) => typeof filter.search === 'string' && filter.search.trim().length > 0)
+    ) {
+      return 'NIP-50 search is disabled by relay configuration'
     }
 
     const maxSubscriptions = subscriptionLimits?.maxSubscriptions ?? 0

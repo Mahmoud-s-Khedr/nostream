@@ -413,5 +413,16 @@ describe('SubscribeMessageHandler', () => {
 
       expect((handler as any).canSubscribe('123456', filters)).to.be.undefined
     })
+
+    it('returns reason if NIP-50 search is disabled and search filter is present', () => {
+      settingsFactory.returns({
+        nip50: { enabled: false },
+      })
+      filters = [{ search: 'nostr' }]
+
+      expect((handler as any).canSubscribe(subscriptionId, filters)).to.equal(
+        'NIP-50 search is disabled by relay configuration',
+      )
+    })
   })
 })

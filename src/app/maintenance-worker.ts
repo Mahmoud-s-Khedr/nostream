@@ -242,7 +242,46 @@ export class MaintenanceWorker implements IRunnable {
       logger('found %d events pending search classification', unclassified.length)
 
       const metadata = unclassified.map((event) => classifySearchMetadata(event.eventId, event.content))
+      const stats = metadata.reduce(
+        (acc, item) => {
+          if (item.language) {
+            acc.languageClassified++
+          }
+          if (item.sentiment === 'positive') {
+            acc.sentimentPositive++
+          } else if (item.sentiment === 'negative') {
+            acc.sentimentNegative++
+          } else {
+            acc.sentimentNeutral++
+          }
+          if (item.nsfw) {
+            acc.nsfwTrue++
+          }
+          if (item.isSpam) {
+            acc.spamTrue++
+          }
+          return acc
+        },
+        {
+          languageClassified: 0,
+          sentimentPositive: 0,
+          sentimentNegative: 0,
+          sentimentNeutral: 0,
+          nsfwTrue: 0,
+          spamTrue: 0,
+        },
+      )
       await this.searchMetadataRepository.upsertMany(metadata)
+      logger(
+        'search classification summary: total=%d language=%d sentiment={+:%d,-:%d,0:%d} nsfw=%d spam=%d',
+        metadata.length,
+        stats.languageClassified,
+        stats.sentimentPositive,
+        stats.sentimentNegative,
+        stats.sentimentNeutral,
+        stats.nsfwTrue,
+        stats.spamTrue,
+      )
     } catch (error) {
       logger('search classification batch failed: %o', error)
     }

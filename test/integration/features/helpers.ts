@@ -3,7 +3,7 @@ import { createHash, createHmac, getRandomValues, Hash } from 'crypto'
 import { Observable } from 'rxjs'
 import WebSocket from 'ws'
 
-import { CommandResult, MessageType, OutgoingMessage } from '../../../src/@types/messages'
+import { ClosedMessage, CommandResult, CountResultMessage, MessageType, OutgoingMessage } from '../../../src/@types/messages'
 import { Event } from '../../../src/@types/event'
 import { serializeEvent } from '../../../src/utils/event'
 import { streams } from './shared'
@@ -72,6 +72,24 @@ export async function createSubscription(
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const data = JSON.stringify(['REQ', subscriptionName, ...subscriptionFilters])
+
+    ws.send(data, (error?: Error) => {
+      if (error) {
+        reject(error)
+      } else {
+        resolve()
+      }
+    })
+  })
+}
+
+export async function createCountQuery(
+  ws: WebSocket,
+  queryId: string,
+  filters: SubscriptionFilter[],
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const data = JSON.stringify([MessageType.COUNT, queryId, ...filters])
 
     ws.send(data, (error?: Error) => {
       if (error) {
@@ -202,6 +220,23 @@ export async function waitForCommand(ws: WebSocket): Promise<CommandResult> {
     observable.subscribe((message: OutgoingMessage) => {
       if (message[0] === MessageType.OK) {
         resolve(message)
+      }
+    })
+  })
+}
+
+export async function waitForCountOrClosed(
+  ws: WebSocket,
+  queryId: string,
+): Promise<CountResultMessage | ClosedMessage> {
+  return new Promise((resolve, reject) => {
+    const observable = streams.get(ws) as Observable<OutgoingMessage>
+
+    observable.subscribe((message: OutgoingMessage) => {
+      if ((message[0] === MessageType.COUNT || message[0] === MessageType.CLOSED) && message[1] === queryId) {
+        resolve(message as CountResultMessage | ClosedMessage)
+      } else if (message[0] === MessageType.NOTICE) {
+        reject(new Error(message[1]))
       }
     })
   })

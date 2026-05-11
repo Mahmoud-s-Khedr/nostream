@@ -204,6 +204,20 @@ describe('NIP-01', () => {
         expect(isEventMatchingFilter({ '#p': ['something else'] })(event)).to.be.false
       })
     })
+
+    describe('search filter', () => {
+      it('returns true when all search terms are present in content', () => {
+        expect(isEventMatchingFilter({ search: 'mirroring relays' })(event)).to.be.true
+      })
+
+      it('returns false when any search term is missing from content', () => {
+        expect(isEventMatchingFilter({ search: 'mirroring bitcoin' })(event)).to.be.false
+      })
+
+      it('returns false for extension-based search in live in-memory matching', () => {
+        expect(isEventMatchingFilter({ search: 'mirroring language:en' })(event)).to.be.false
+      })
+    })
   })
 
   describe('isEventSignatureValid', () => {

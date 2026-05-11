@@ -11,6 +11,7 @@ import { getLeadingZeroBits } from './proof-of-work'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from './filter'
 import { SubscriptionFilter } from '../@types/subscription'
 import { WebSocketServerAdapterEvent } from '../constants/adapter'
+import { parseSearchQuery } from './search-query'
 
 export const serializeEvent = (event: UnidentifiedEvent): CanonicalEvent => [
   0,
@@ -100,6 +101,33 @@ export const isEventMatchingFilter =
         })
     ) {
       return false
+    }
+
+    if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
+      const parsed = parseSearchQuery(filter.search)
+      const hasUnsupportedLiveExtensions =
+        parsed.extensions.includeSpam ||
+        typeof parsed.extensions.domain === 'string' ||
+        typeof parsed.extensions.language === 'string' ||
+        typeof parsed.extensions.sentiment === 'string' ||
+        typeof parsed.extensions.nsfw === 'boolean'
+
+      // Live broadcast filtering has no access to DB-backed search metadata.
+      // To avoid false positives, only text-only search is evaluated in-memory.
+      if (hasUnsupportedLiveExtensions) {
+        return false
+      }
+
+      const terms = parsed.text
+        .toLowerCase()
+        .split(/\s+/)
+        .map((term) => term.trim())
+        .filter(Boolean)
+      const content = event.content.toLowerCase()
+
+      if (!terms.every((term) => content.includes(term))) {
+        return false
+      }
     }
 
     return true

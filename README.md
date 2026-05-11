@@ -84,6 +84,12 @@ Supported extensions in the search query string:
 
 Search results are ranked by relevance score (not `created_at`) and `limit` is applied after ranking.  
 Search metadata (`language`, `sentiment`, `nsfw`, `is_spam`) is classified asynchronously, so freshly published events may take a short time to appear in search.
+Set `nip50.enabled` to `false` to disable `search` handling and NIP-50 advertisement.
+
+Classifier caveats:
+- `language`, `sentiment`, `nsfw`, and `is_spam` are heuristic classifications.
+- Results may contain false positives/negatives and should not be treated as moderation policy by themselves.
+- Live in-memory subscription matching only supports text-only search terms; extension-only search is evaluated from DB-backed query paths.
 
 ## Requirements
 

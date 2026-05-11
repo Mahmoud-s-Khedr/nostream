@@ -62,6 +62,8 @@ nip05:
   domainBlacklist: []
 nip45:
   enabled: true
+nip50:
+  enabled: true
 network:
   maxPayloadSize: 524288
   # Uncomment only when using a trusted reverse proxy and configuring trustedProxies.

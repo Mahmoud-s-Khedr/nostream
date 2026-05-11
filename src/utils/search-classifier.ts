@@ -1,6 +1,22 @@
 import { SearchMetadata, SearchSentiment } from '../@types/search'
 
 const CLASSIFIER_VERSION = 'v1'
+const DEFAULT_MAX_CLASSIFIER_CONTENT_LENGTH = 20000
+
+const parseMaxClassifierContentLength = (raw: string | undefined): number => {
+  if (typeof raw === 'undefined') {
+    return DEFAULT_MAX_CLASSIFIER_CONTENT_LENGTH
+  }
+
+  const parsed = Number(raw)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return DEFAULT_MAX_CLASSIFIER_CONTENT_LENGTH
+  }
+
+  return parsed
+}
+
+const MAX_CLASSIFIER_CONTENT_LENGTH = parseMaxClassifierContentLength(process.env.NOSTREAM_MAX_CLASSIFIER_CONTENT_LENGTH)
 
 const POSITIVE_WORDS = new Set([
   'good',
@@ -71,16 +87,29 @@ const hasAnyWord = (text: string, words: Set<string>): boolean => {
   return tokens.some((token) => words.has(token))
 }
 
+const normalizeContent = (input: unknown): string => {
+  if (typeof input !== 'string') {
+    return ''
+  }
+
+  return input.slice(0, MAX_CLASSIFIER_CONTENT_LENGTH)
+}
+
 export const classifySearchMetadata = (
   eventId: string,
-  content: string,
+  content: unknown,
   classifiedAt: Date = new Date(),
-): SearchMetadata => ({
-  eventId,
-  language: detectLanguage(content),
-  sentiment: sentimentOf(content),
-  nsfw: hasAnyWord(content, NSFW_WORDS),
-  isSpam: hasAnyWord(content, SPAM_WORDS),
-  classifierVersion: CLASSIFIER_VERSION,
-  classifiedAt,
-})
+): SearchMetadata => {
+  // Empty/invalid text falls back to neutral non-NSFW non-spam metadata.
+  const normalizedContent = normalizeContent(content)
+
+  return {
+    eventId,
+    language: detectLanguage(normalizedContent),
+    sentiment: sentimentOf(normalizedContent),
+    nsfw: hasAnyWord(normalizedContent, NSFW_WORDS),
+    isSpam: hasAnyWord(normalizedContent, SPAM_WORDS),
+    classifierVersion: CLASSIFIER_VERSION,
+    classifiedAt,
+  }
+}

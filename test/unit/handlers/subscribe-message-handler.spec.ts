@@ -268,6 +268,19 @@ describe('SubscribeMessageHandler', () => {
 
       expect((SubscribeMessageHandler as any).isClientSubscribedToEvent(filters)(event)).to.be.true
     })
+
+    it('ignores search text matching for backfill events and only enforces non-search predicates', () => {
+      const filters: SubscriptionFilter[] = [{ kinds: [1], authors: ['aa'], search: '"orange juice"' }]
+      const event: Event = {
+        id: 'bb',
+        kind: 1,
+        pubkey: 'aa11',
+        tags: [],
+        content: 'does not include phrase',
+      } as any
+
+      expect((SubscribeMessageHandler as any).isClientSubscribedToEvent(filters)(event)).to.be.true
+    })
   })
 
   describe('#canSubscribe', () => {

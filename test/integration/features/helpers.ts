@@ -235,8 +235,6 @@ export async function waitForCountOrClosed(
     observable.subscribe((message: OutgoingMessage) => {
       if ((message[0] === MessageType.COUNT || message[0] === MessageType.CLOSED) && message[1] === queryId) {
         resolve(message as CountResultMessage | ClosedMessage)
-      } else if (message[0] === MessageType.NOTICE) {
-        reject(new Error(message[1]))
       }
     })
   })

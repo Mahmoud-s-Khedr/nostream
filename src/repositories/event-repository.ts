@@ -73,7 +73,7 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events')
 
-      const { isTagQuery, isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
+      const { isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
         builder.limit(currentFilter.limit)
@@ -92,9 +92,9 @@ export class EventRepository implements IEventRepository {
         builder.orderBy('event_created_at', 'asc').orderBy('event_id', 'asc')
       }
 
-      if (isTagQuery) {
-        builder.select('events.*')
-      }
+      // Always project canonical event columns only, even for joined search/tag queries.
+      // This avoids row-shape ambiguity from SELECT * across multiple joined tables.
+      builder.select('events.*')
 
       return builder
     })
@@ -124,7 +124,10 @@ export class EventRepository implements IEventRepository {
       if (typeof currentFilter.limit === 'number') {
         builder.limit(currentFilter.limit)
         if (isSearchQuery) {
-          builder.orderBy('search_rank', 'desc').orderBy('event_created_at', 'desc').orderBy('event_id', 'asc')
+          builder
+            .orderBy('search_rank', 'desc')
+            .orderBy('event_created_at', 'desc')
+            .orderBy('event_id', 'asc')
         } else {
           builder.orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
         }

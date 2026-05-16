@@ -31,6 +31,8 @@ jobs:
             src:
               - 'src/**'
               - 'test/**'
+              - 'scripts/**'
+              - 'migrations/**'
               - 'package.json'
               - 'pnpm-lock.yaml'
               - 'tsconfig*.json'
@@ -188,6 +190,74 @@ jobs:
         with:
           name: integration-coverage-lcov
           path: .coverage/integration/lcov.info
+
+  nip50-runtime-verification:
+    name: NIP-50 Runtime Verification
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - lint
+      - build-check
+    if: |
+      needs.changes.outputs.src == 'true' &&
+      needs.lint.result == 'success' &&
+      needs.build-check.result == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Install package dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start Postgres/Redis (Docker integration stack)
+        run: docker compose -f ./test/integration/docker-compose.yml up -d db-test cache-test
+      - name: Wait for Postgres
+        run: |
+          for i in {1..60}; do
+            if docker compose -f ./test/integration/docker-compose.yml exec -T db-test pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Run migration lifecycle (apply/rollback/re-apply)
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 25432
+          DB_NAME: nostr_ts_relay_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        run: pnpm run db:migrate:lifecycle
+      - name: Run integration suite
+        run: pnpm run docker:test:integration
+      - name: Verify NIP-50 query plans and index evidence
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 25432
+          DB_NAME: nostr_ts_relay_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        run: pnpm run db:verify:nip50:plans
+      - name: Measure NIP-50 write overhead
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 25432
+          DB_NAME: nostr_ts_relay_test
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+        run: pnpm run db:verify:nip50:writes
+      - uses: actions/upload-artifact@v4
+        name: Upload NIP-50 verification artifacts
+        if: ${{ always() }}
+        with:
+          name: nip50-runtime-verification
+          path: .test-reports/nip50/*
+      - name: Stop Docker integration stack
+        if: ${{ always() }}
+        run: docker compose -f ./test/integration/docker-compose.yml down -v
 
   post-tests:
     name: Post Tests

@@ -84,6 +84,7 @@ Supported extensions in the search query string:
 
 Search results are ranked by relevance score (not `created_at`) and `limit` is applied after ranking.  
 Search metadata (`language`, `sentiment`, `nsfw`, `is_spam`) is classified asynchronously, so freshly published events may take a short time to appear in search.
+By default, unclassified events are excluded from search until an `event_search_metadata` row exists with `is_spam=false`.
 Set `nip50.enabled` to `false` to disable `search` handling and NIP-50 advertisement.
 
 Classifier caveats:

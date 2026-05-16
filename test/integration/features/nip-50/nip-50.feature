@@ -3,7 +3,9 @@ Feature: NIP-50
     Given someone called Alice
     And someone called Bob
     When Bob sends a text_note event with content "nostr search apples"
+    And Bob marks the last event with language "en", sentiment "neutral", nsfw false, spam false
     And Bob sends a text_note event with content "nostr search oranges"
+    And Bob marks the last event with language "en", sentiment "neutral", nsfw false, spam false
     And Alice subscribes with search "apples"
     Then Alice receives 1 search result event from Bob with content "nostr search apples"
 
@@ -11,7 +13,9 @@ Feature: NIP-50
     Given someone called Alice
     And someone called Bob
     When Bob sends a text_note event with content "nostr count bananas"
+    And Bob marks the last event with language "en", sentiment "neutral", nsfw false, spam false
     And Bob sends a text_note event with content "nostr count bananas again"
+    And Bob marks the last event with language "en", sentiment "neutral", nsfw false, spam false
     And Alice counts with search "bananas"
     Then Alice receives count result 2
 
@@ -97,6 +101,14 @@ Feature: NIP-50
     Then Alice receives search results in this content order:
       | nip50 rank apples apples apples oranges |
       | nip50 rank apples oranges               |
+
+  Scenario: Backfill search follows PostgreSQL semantics for operator-style queries
+    Given someone called Alice
+    And someone called Bob
+    When Bob sends a text_note event with content "nip50 phrase orange juice sample"
+    And Bob marks the last event with language "en", sentiment "neutral", nsfw false, spam false
+    And Alice subscribes with search "orange OR kiwi"
+    Then Alice receives 1 search result event from Bob with content "nip50 phrase orange juice sample"
 
   Scenario: COUNT supports search extension filters
     Given someone called Alice

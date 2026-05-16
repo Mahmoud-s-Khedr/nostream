@@ -69,5 +69,5 @@ export interface ISearchMetadataRepository {
   upsert(metadata: SearchMetadata): Promise<number>
   upsertMany(metadata: SearchMetadata[]): Promise<number>
   findByEventId(eventId: EventId): Promise<SearchMetadata | undefined>
-  findUnclassifiedEvents(limit: number): Promise<Array<{ eventId: EventId; content: string }>>
+  findUnclassifiedEvents(limit: number): Promise<Array<{ eventId: EventId; content: string; pubkey: Pubkey; kind: number }>>
 }

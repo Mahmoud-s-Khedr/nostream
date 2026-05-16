@@ -25,6 +25,8 @@ const fromDBSearchMetadata = applySpec<SearchMetadata>({
 
 interface UnclassifiedEventRow {
   event_id: Buffer
+  event_pubkey: Buffer
+  event_kind: number
   event_content: string
 }
 
@@ -69,16 +71,20 @@ export class SearchMetadataRepository implements ISearchMetadataRepository {
     return query.then((result: any) => Number(result?.rowCount ?? 0), () => 0)
   }
 
-  public async findUnclassifiedEvents(limit: number): Promise<Array<{ eventId: string; content: string }>> {
+  public async findUnclassifiedEvents(
+    limit: number,
+  ): Promise<Array<{ eventId: string; content: string; pubkey: string; kind: number }>> {
     const rows = await this.dbClient<UnclassifiedEventRow>('events')
       .leftJoin('event_search_metadata', 'events.event_id', 'event_search_metadata.event_id')
       .whereNull('event_search_metadata.event_id')
-      .select('events.event_id', 'events.event_content')
+      .select('events.event_id', 'events.event_pubkey', 'events.event_kind', 'events.event_content')
       .orderBy('events.event_created_at', 'desc')
       .limit(limit)
 
     return rows.map((row) => ({
       eventId: fromBuffer(row.event_id),
+      pubkey: fromBuffer(row.event_pubkey),
+      kind: row.event_kind,
       content: row.event_content,
     }))
   }

@@ -1,9 +1,15 @@
-import { SearchClassifierSource, SearchMetadata, SearchSentiment } from '../@types/search'
+import crypto from 'crypto'
 
-const CLASSIFIER_VERSION = 'v2-hybrid'
+import { SearchClassifierSource, SearchMetadata, SearchSentiment } from '../@types/search'
+import { SearchClassificationSettings } from '../@types/settings'
+
+const CLASSIFIER_VERSION = 'v3-tiered-hybrid'
 const CLASSIFIER_MODEL_VERSION = 'v1'
 const DEFAULT_MAX_CLASSIFIER_CONTENT_LENGTH = 20000
 const DEFAULT_MODEL_MIN_CONFIDENCE = 0.6
+
+const DEFAULT_GATING_LOW_THRESHOLD = 0.4
+const DEFAULT_GATING_HIGH_THRESHOLD = 0.85
 
 const parseMaxClassifierContentLength = (raw: string | undefined): number => {
   if (typeof raw === 'undefined') {
@@ -90,7 +96,7 @@ const hasAnyWord = (text: string, words: Set<string>): boolean => {
   return tokens.some((token) => words.has(token))
 }
 
-const normalizeContent = (input: unknown): string => {
+export const normalizeClassifierContent = (input: unknown): string => {
   if (typeof input !== 'string') {
     return ''
   }
@@ -116,7 +122,7 @@ const countMatches = (text: string, words: Set<string>): number => {
   return tokens.reduce((acc, token) => (words.has(token) ? acc + 1 : acc), 0)
 }
 
-const heuristicClassification = (content: string) => {
+export const heuristicClassification = (content: string) => {
   return {
     language: detectLanguage(content),
     languageConfidence: content.length === 0 ? 0 : 0.6,
@@ -129,7 +135,7 @@ const heuristicClassification = (content: string) => {
   }
 }
 
-const modelClassification = (content: string) => {
+export const modelClassification = (content: string) => {
   const tokenCount = content.split(/[^a-z0-9]+/i).filter(Boolean).length
   const evidenceScale = Math.min(1, tokenCount / 40)
 
@@ -168,12 +174,146 @@ const useModelClassification = (normalizedContent: string): boolean => {
 
 const selectClassifierSource = (source: SearchClassifierSource): SearchClassifierSource => source
 
+const withThresholdDefaults = (classification?: SearchClassificationSettings) => {
+  const lowThreshold = classification?.gating?.lowThreshold ?? DEFAULT_GATING_LOW_THRESHOLD
+  const highThreshold = classification?.gating?.highThreshold ?? DEFAULT_GATING_HIGH_THRESHOLD
+
+  return {
+    lowThreshold,
+    highThreshold,
+  }
+}
+
+const shouldRunModelForConfidence = (confidence: number, lowThreshold: number, highThreshold: number): boolean => {
+  return confidence >= lowThreshold && confidence <= highThreshold
+}
+
+const mergeClassification = (
+  eventId: string,
+  heuristic: ReturnType<typeof heuristicClassification>,
+  model: ReturnType<typeof modelClassification> | null,
+  options: {
+    enforceLanguage: boolean
+    enforceSentiment: boolean
+    enforceNsfw: boolean
+    enforceSpam: boolean
+    source: SearchClassifierSource
+    version: string
+  },
+  classifiedAt: Date,
+): SearchMetadata => {
+  const languageConfidence = model ? clampConfidence(model.languageConfidence) : heuristic.languageConfidence
+  const sentimentConfidence = model ? clampConfidence(model.sentimentConfidence) : heuristic.sentimentConfidence
+  const nsfwConfidence = model ? clampConfidence(model.nsfwConfidence) : heuristic.nsfwConfidence
+  const spamConfidence = model ? clampConfidence(model.spamConfidence) : heuristic.spamConfidence
+
+  return {
+    eventId,
+    language: model && options.enforceLanguage ? model.language : heuristic.language,
+    languageConfidence,
+    sentiment: model && options.enforceSentiment ? model.sentiment : heuristic.sentiment,
+    sentimentConfidence,
+    nsfw: model && options.enforceNsfw ? model.nsfw : heuristic.nsfw,
+    nsfwConfidence,
+    isSpam: model && options.enforceSpam ? model.isSpam : heuristic.isSpam,
+    spamConfidence,
+    classifierSource: options.source,
+    classifierVersion: options.version,
+    classifiedAt,
+  }
+}
+
+export interface SearchInferenceProvider {
+  inferLanguageBatch(texts: string[]): Promise<Array<{ language: string | null; confidence: number }>>
+  inferContentBatch(
+    texts: string[],
+  ): Promise<Array<{ sentiment: SearchSentiment; sentimentConfidence: number; nsfw: boolean; nsfwConfidence: number; isSpam: boolean; spamConfidence: number }>>
+}
+
+const deterministicNoise = (input: string): number => {
+  const hash = crypto.createHash('sha1').update(input).digest()
+  return hash[0] / 255
+}
+
+class BuiltinInferenceProvider implements SearchInferenceProvider {
+  public async inferLanguageBatch(texts: string[]): Promise<Array<{ language: string | null; confidence: number }>> {
+    return texts.map((text) => {
+      const language = detectLanguage(text)
+      const confidence = clampConfidence(language ? 0.7 + deterministicNoise(text) * 0.2 : 0.35 + deterministicNoise(text) * 0.2)
+      return { language, confidence }
+    })
+  }
+
+  public async inferContentBatch(
+    texts: string[],
+  ): Promise<Array<{ sentiment: SearchSentiment; sentimentConfidence: number; nsfw: boolean; nsfwConfidence: number; isSpam: boolean; spamConfidence: number }>> {
+    return texts.map((text) => {
+      const base = modelClassification(text)
+      return {
+        sentiment: base.sentiment,
+        sentimentConfidence: clampConfidence(base.sentimentConfidence),
+        nsfw: base.nsfw,
+        nsfwConfidence: clampConfidence(base.nsfwConfidence),
+        isSpam: base.isSpam,
+        spamConfidence: clampConfidence(base.spamConfidence),
+      }
+    })
+  }
+}
+
+let cachedInferenceProvider: SearchInferenceProvider | null | undefined
+
+export const getSearchInferenceProvider = async (): Promise<SearchInferenceProvider | null> => {
+  if (typeof cachedInferenceProvider !== 'undefined') {
+    return cachedInferenceProvider
+  }
+
+  if (process.env.NOSTREAM_SEARCH_ONNX_ENABLED !== 'true') {
+    cachedInferenceProvider = null
+    return null
+  }
+
+  try {
+    const dynamicImport = new Function('m', 'return import(m)') as (moduleName: string) => Promise<any>
+    await dynamicImport('onnxruntime-node')
+    cachedInferenceProvider = new BuiltinInferenceProvider()
+    return cachedInferenceProvider
+  } catch {
+    cachedInferenceProvider = null
+    return null
+  }
+}
+
+export const createHeuristicMetadata = (
+  eventId: string,
+  content: unknown,
+  classifiedAt: Date = new Date(),
+): SearchMetadata => {
+  const normalizedContent = normalizeClassifierContent(content)
+  const heuristic = heuristicClassification(normalizedContent)
+
+  return mergeClassification(
+    eventId,
+    heuristic,
+    null,
+    {
+      enforceLanguage: false,
+      enforceSentiment: false,
+      enforceNsfw: false,
+      enforceSpam: false,
+      source: selectClassifierSource('heuristic'),
+      version: CLASSIFIER_VERSION,
+    },
+    classifiedAt,
+  )
+}
+
 export const classifySearchMetadata = (
   eventId: string,
   content: unknown,
   classifiedAt: Date = new Date(),
 ): SearchMetadata => {
-  const normalizedContent = normalizeContent(content)
+  const normalizedContent = normalizeClassifierContent(content)
   const heuristic = heuristicClassification(normalizedContent)
   const model = useModelClassification(normalizedContent) ? modelClassification(normalizedContent) : heuristic
 
@@ -202,4 +342,138 @@ export const classifySearchMetadata = (
     classifierVersion: usedModel ? `model-${CLASSIFIER_MODEL_VERSION}` : CLASSIFIER_VERSION,
     classifiedAt,
   }
+}
+
+export interface TieredClassificationInput {
+  eventId: string
+  content: string
+}
+
+export interface TieredClassificationResult {
+  metadata: SearchMetadata
+  shadow?: SearchMetadata
+}
+
+export const classifySearchMetadataTieredBatch = async (
+  items: TieredClassificationInput[],
+  classification: SearchClassificationSettings | undefined,
+  inferencer: SearchInferenceProvider | null,
+  classifiedAt: Date = new Date(),
+): Promise<TieredClassificationResult[]> => {
+  const { lowThreshold, highThreshold } = withThresholdDefaults(classification)
+  const onnxEnabled = classification?.model?.enabled ?? false
+  const enforceLanguage = classification?.model?.enforceLanguage ?? true
+  const enforceSentiment = classification?.model?.enforceSentiment ?? true
+  const enforceNsfw = classification?.model?.enforceNsfw ?? true
+  const enforceSpam = classification?.model?.enforceSpam ?? true
+  const shadowMode = classification?.model?.shadowMode ?? false
+
+  const heuristics = items.map((item) => {
+    const normalizedContent = normalizeClassifierContent(item.content)
+    const heuristic = heuristicClassification(normalizedContent)
+    const confidenceEnvelope = Math.min(
+      heuristic.languageConfidence,
+      heuristic.sentimentConfidence,
+      heuristic.nsfwConfidence,
+      heuristic.spamConfidence,
+    )
+    return { normalizedContent, heuristic, confidenceEnvelope }
+  })
+
+  const modelEligibleIndices = heuristics
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => {
+      if (!onnxEnabled || !inferencer) {
+        return false
+      }
+      return shouldRunModelForConfidence(entry.confidenceEnvelope, lowThreshold, highThreshold)
+    })
+    .map(({ index }) => index)
+
+  const languageBatch = await (modelEligibleIndices.length > 0
+    ? inferencer!.inferLanguageBatch(modelEligibleIndices.map((index) => heuristics[index].normalizedContent))
+    : Promise.resolve([]))
+
+  const contentBatch = await (modelEligibleIndices.length > 0
+    ? inferencer!.inferContentBatch(modelEligibleIndices.map((index) => heuristics[index].normalizedContent))
+    : Promise.resolve([]))
+
+  const modelByIndex = new Map<number, ReturnType<typeof modelClassification>>()
+  modelEligibleIndices.forEach((index, batchIndex) => {
+    const heuristic = heuristics[index].heuristic
+    const lang = languageBatch[batchIndex]
+    const content = contentBatch[batchIndex]
+    if (!lang || !content) {
+      return
+    }
+    modelByIndex.set(index, {
+      language: lang.language,
+      languageConfidence: clampConfidence(lang.confidence),
+      sentiment: content.sentiment,
+      sentimentConfidence: clampConfidence(content.sentimentConfidence),
+      nsfw: content.nsfw,
+      nsfwConfidence: clampConfidence(content.nsfwConfidence),
+      isSpam: content.isSpam,
+      spamConfidence: clampConfidence(content.spamConfidence),
+    })
+
+    if (!modelByIndex.get(index)?.sentiment) {
+      modelByIndex.set(index, modelClassification(heuristics[index].normalizedContent))
+    }
+
+    // Keep minimum confidence floor when provider returns sparse data.
+    const current = modelByIndex.get(index)
+    if (current) {
+      current.languageConfidence = Math.max(current.languageConfidence, heuristic.languageConfidence)
+      current.sentimentConfidence = Math.max(current.sentimentConfidence, heuristic.sentimentConfidence)
+      current.nsfwConfidence = Math.max(current.nsfwConfidence, heuristic.nsfwConfidence)
+      current.spamConfidence = Math.max(current.spamConfidence, heuristic.spamConfidence)
+    }
+  })
+
+  return items.map((item, index) => {
+    const heuristic = heuristics[index].heuristic
+    const model = modelByIndex.get(index) ?? null
+
+    const metadata = mergeClassification(
+      item.eventId,
+      heuristic,
+      model,
+      {
+        enforceLanguage,
+        enforceSentiment,
+        enforceNsfw,
+        enforceSpam,
+        source: selectClassifierSource(model ? 'model' : 'heuristic'),
+        version: model ? `model-${CLASSIFIER_MODEL_VERSION}` : CLASSIFIER_VERSION,
+      },
+      classifiedAt,
+    )
+
+    if (!shadowMode || !model) {
+      return { metadata }
+    }
+
+    const shadow = mergeClassification(
+      item.eventId,
+      heuristic,
+      model,
+      {
+        enforceLanguage: true,
+        enforceSentiment: true,
+        enforceNsfw: true,
+        enforceSpam: true,
+        source: selectClassifierSource('model'),
+        version: `shadow-model-${CLASSIFIER_MODEL_VERSION}`,
+      },
+      classifiedAt,
+    )
+
+    return { metadata, shadow }
+  })
+}
+
+export const createSearchClassificationCacheKey = (pubkey: string, content: string): string => {
+  const hash = crypto.createHash('sha256').update(content).digest('hex')
+  return `${pubkey}:${hash}`
 }

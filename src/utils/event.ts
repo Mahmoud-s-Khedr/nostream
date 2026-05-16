@@ -11,11 +11,12 @@ import { getLeadingZeroBits } from './proof-of-work'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from './filter'
 import { SubscriptionFilter } from '../@types/subscription'
 import { WebSocketServerAdapterEvent } from '../constants/adapter'
-import { parseSearchQuery } from './search-query'
+import { hasSearchExtensions, parseSearchQuery } from './search-query'
 import { SearchMetadata } from '../@types/search'
 
 interface EventFilterContext {
   searchMetadata?: Pick<SearchMetadata, 'language' | 'sentiment' | 'nsfw' | 'isSpam'>
+  strictSearchExtensions?: boolean
 }
 
 export const serializeEvent = (event: UnidentifiedEvent): CanonicalEvent => [
@@ -110,15 +111,13 @@ export const isEventMatchingFilter =
 
     if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
       const parsed = parseSearchQuery(filter.search)
-      const hasSearchExtensions =
-        parsed.extensions.includeSpam ||
-        typeof parsed.extensions.domain === 'string' ||
-        typeof parsed.extensions.language === 'string' ||
-        typeof parsed.extensions.sentiment === 'string' ||
-        typeof parsed.extensions.nsfw === 'boolean'
+      const hasExtensions = hasSearchExtensions(parsed.extensions)
 
       const metadata = context?.searchMetadata
-      if (hasSearchExtensions && metadata) {
+      if (hasExtensions && context?.strictSearchExtensions && !metadata) {
+        return false
+      }
+      if (hasExtensions && metadata) {
         if (!parsed.extensions.includeSpam && metadata.isSpam) {
           return false
         }

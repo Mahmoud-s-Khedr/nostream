@@ -1,6 +1,10 @@
 import { expect } from 'chai'
 
-import { classifySearchMetadata } from '../../../src/utils/search-classifier'
+import {
+  classifySearchMetadata,
+  classifySearchMetadataTieredBatch,
+  createSearchClassificationCacheKey,
+} from '../../../src/utils/search-classifier'
 
 describe('search-classifier', () => {
   it('classifies invalid content with safe defaults', () => {
@@ -65,5 +69,47 @@ describe('search-classifier', () => {
     }
 
     delete require.cache[modulePath]
+  })
+
+  it('runs tiered classification with model path for middle-band confidence only', async () => {
+    const result = await classifySearchMetadataTieredBatch(
+      [{ eventId: 'e'.repeat(64), content: 'the giveaway is awesome' }],
+      {
+        model: {
+          enabled: true,
+        },
+        gating: {
+          lowThreshold: 0.5,
+          highThreshold: 0.9,
+        },
+      } as any,
+      {
+        inferLanguageBatch: async () => [{ language: 'en', confidence: 0.9 }],
+        inferContentBatch: async () => [
+          {
+            sentiment: 'positive',
+            sentimentConfidence: 0.9,
+            nsfw: false,
+            nsfwConfidence: 0.9,
+            isSpam: true,
+            spamConfidence: 0.9,
+          },
+        ],
+      },
+    )
+
+    expect(result).to.have.length(1)
+    expect(result[0].metadata.classifierSource).to.equal('model')
+    expect(result[0].metadata.language).to.equal('en')
+    expect(result[0].metadata.isSpam).to.equal(true)
+  })
+
+  it('builds stable cache keys for pubkey/content', () => {
+    const keyA = createSearchClassificationCacheKey('f'.repeat(64), 'hello world')
+    const keyB = createSearchClassificationCacheKey('f'.repeat(64), 'hello world')
+    const keyC = createSearchClassificationCacheKey('f'.repeat(64), 'hello world 2')
+
+    expect(keyA).to.equal(keyB)
+    expect(keyA).to.not.equal(keyC)
   })
 })

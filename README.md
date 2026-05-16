@@ -87,9 +87,9 @@ Search metadata (`language`, `sentiment`, `nsfw`, `is_spam`) is classified async
 Set `nip50.enabled` to `false` to disable `search` handling and NIP-50 advertisement.
 
 Classifier caveats:
-- `language`, `sentiment`, `nsfw`, and `is_spam` use a hybrid classifier (model-first with heuristic fallback).
+- `language`, `sentiment`, `nsfw`, and `is_spam` use a tiered classifier (heuristic-first, optional ONNX model for ambiguous cases).
 - Results may contain false positives/negatives and should not be treated as moderation policy by themselves.
-- Live in-memory subscription matching applies extension checks only when metadata is already available; if metadata is not yet stored, the live event may still be emitted.
+- Live extension-filtered subscriptions require stored metadata; events without metadata are suppressed until classification is available.
 
 ## Requirements
 

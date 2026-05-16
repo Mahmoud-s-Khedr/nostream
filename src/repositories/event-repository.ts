@@ -119,10 +119,15 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events').select('events.event_id')
 
-      const { isTagQuery } = this.applyFilterConditions(builder, currentFilter)
+      const { isTagQuery, isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
-        builder.limit(currentFilter.limit).orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        builder.limit(currentFilter.limit)
+        if (isSearchQuery) {
+          builder.orderBy('search_rank', 'desc').orderBy('event_created_at', 'desc').orderBy('event_id', 'asc')
+        } else {
+          builder.orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        }
       }
 
       if (isTagQuery) {

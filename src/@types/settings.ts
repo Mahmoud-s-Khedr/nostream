@@ -247,6 +247,48 @@ export interface Nip45Settings {
 
 export interface Nip50Settings {
   enabled?: boolean
+  classification?: SearchClassificationSettings
+}
+
+export interface SearchClassificationModelSettings {
+  enabled?: boolean
+  languageModelPath?: string
+  contentModelPath?: string
+  shadowMode?: boolean
+  enforceLanguage?: boolean
+  enforceSentiment?: boolean
+  enforceNsfw?: boolean
+  enforceSpam?: boolean
+}
+
+export interface SearchClassificationQueueSettings {
+  batchSize?: number
+  maxPerSecond?: number
+  maxLagSeconds?: number
+  searchableKinds?: number[]
+}
+
+export interface SearchClassificationCacheSettings {
+  ttlMs?: number
+  maxEntries?: number
+}
+
+export interface SearchClassificationGatingSettings {
+  lowThreshold?: number
+  highThreshold?: number
+}
+
+export interface SearchClassificationSloSettings {
+  maxWorkerCpuPercent?: number
+}
+
+export interface SearchClassificationSettings {
+  enabled?: boolean
+  model?: SearchClassificationModelSettings
+  queue?: SearchClassificationQueueSettings
+  cache?: SearchClassificationCacheSettings
+  gating?: SearchClassificationGatingSettings
+  slo?: SearchClassificationSloSettings
 }
 
 export interface Nip05Settings {

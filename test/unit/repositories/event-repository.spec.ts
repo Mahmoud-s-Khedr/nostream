@@ -575,6 +575,19 @@ describe('EventRepository', () => {
       expect(sql).to.include('order by "event_created_at" DESC, "event_id" asc limit 3')
     })
 
+    it('applies relevance-first ordering when count filter includes search and limit', async () => {
+      const fromStub = sandbox.stub(rrDbClient, 'from').returns({
+        countDistinct: () => ({
+          first: async () => ({ count: '1' }),
+        }),
+      } as any)
+
+      await repository.countByFilters([{ search: 'nostr apps', limit: 3 } as any])
+
+      const sql = fromStub.firstCall.args[0].toString()
+      expect(sql).to.include('order by "search_rank" desc, "event_created_at" desc, "event_id" asc limit 3')
+    })
+
     it('filters out deleted and expired events', async () => {
       const fromStub = sandbox.stub(rrDbClient, 'from').returns({
         countDistinct: () => ({

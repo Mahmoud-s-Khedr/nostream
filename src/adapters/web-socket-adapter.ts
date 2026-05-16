@@ -21,6 +21,7 @@ import { isEventMatchingFilter } from '../utils/event'
 import { messageSchema } from '../schemas/message-schema'
 import { Settings } from '../@types/settings'
 import { SocketAddress } from 'net'
+import { hasSearchExtensions, parseSearchQuery } from '../utils/search-query'
 
 const logger = createLogger('web-socket-adapter')
 const debugHeartbeat = logger.extend('heartbeat')
@@ -32,6 +33,7 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   private clientAddress: SocketAddress
   private alive: boolean
   private subscriptions: Map<SubscriptionId, SubscriptionFilter[]>
+  private suppressedSearchEventsWithoutMetadata = 0
 
   public constructor(
     private readonly client: WebSocket,
@@ -112,7 +114,25 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   public onSendEvent(event: Event): void {
     const eventSearchMetadata = (event as any).searchMetadata
     this.subscriptions.forEach((filters, subscriptionId) => {
-      if (filters.map((filter) => isEventMatchingFilter(filter, { searchMetadata: eventSearchMetadata })).some((isMatch) => isMatch(event))) {
+      if (
+        filters.some((filter) => {
+          if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
+            const parsed = parseSearchQuery(filter.search)
+            if (hasSearchExtensions(parsed.extensions) && !eventSearchMetadata) {
+              this.suppressedSearchEventsWithoutMetadata++
+              if (this.suppressedSearchEventsWithoutMetadata % 100 === 0) {
+                logger(
+                  'suppressed %d live search events due to missing metadata',
+                  this.suppressedSearchEventsWithoutMetadata,
+                )
+              }
+              return false
+            }
+          }
+
+          return isEventMatchingFilter(filter, { searchMetadata: eventSearchMetadata, strictSearchExtensions: true })(event)
+        })
+      ) {
         logger('sending event to client %s: %o', this.clientId, event)
         this.sendMessage(createOutgoingEventMessage(subscriptionId, event))
       }

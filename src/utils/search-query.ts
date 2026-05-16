@@ -93,3 +93,10 @@ export const parseSearchQuery = (query: string): ParsedSearchQuery => {
     extensions,
   }
 }
+
+export const hasSearchExtensions = (extensions: SearchExtensions): boolean =>
+  extensions.includeSpam ||
+  typeof extensions.domain === 'string' ||
+  typeof extensions.language === 'string' ||
+  typeof extensions.sentiment === 'string' ||
+  typeof extensions.nsfw === 'boolean'

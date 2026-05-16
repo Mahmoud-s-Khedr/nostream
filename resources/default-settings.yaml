@@ -64,6 +64,29 @@ nip45:
   enabled: true
 nip50:
   enabled: true
+  classification:
+    enabled: true
+    model:
+      enabled: false
+      shadowMode: true
+      enforceLanguage: true
+      enforceSentiment: true
+      enforceNsfw: true
+      enforceSpam: true
+    queue:
+      batchSize: 200
+      maxPerSecond: 200
+      maxLagSeconds: 45
+      searchableKinds:
+        - 1
+    cache:
+      ttlMs: 300000
+      maxEntries: 5000
+    gating:
+      lowThreshold: 0.4
+      highThreshold: 0.85
+    slo:
+      maxWorkerCpuPercent: 85
 network:
   maxPayloadSize: 524288
   # Uncomment only when using a trusted reverse proxy and configuring trustedProxies.

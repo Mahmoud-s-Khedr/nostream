@@ -182,6 +182,17 @@ The settings below are listed in alphabetical order by name. Please keep this ta
 | nip05.verifyUpdateFrequency                 | Minimum interval in milliseconds between re-verification attempts for a given author. Defaults to 86400000 (24 hours). |
 | nip45.enabled                               | Enable or disable NIP-45 COUNT handling. Defaults to true. |
 | nip50.enabled                               | Enable or disable NIP-50 search handling and advertisement. Defaults to true. |
+| nip50.classification.enabled                | Enable background search metadata classification pipeline. Defaults to true. |
+| nip50.classification.model.enabled          | Enable optional ONNX model stage for ambiguous classifications. Defaults to false. |
+| nip50.classification.model.shadowMode       | Compute model outputs for comparison while preserving current enforced outputs. Defaults to true. |
+| nip50.classification.queue.batchSize        | Number of events fetched per classification batch. Defaults to 200. |
+| nip50.classification.queue.maxPerSecond     | Classification throughput cap per worker. Defaults to 200. |
+| nip50.classification.queue.maxLagSeconds    | Queue-lag threshold after which model stage is temporarily disabled. Defaults to 45. |
+| nip50.classification.cache.ttlMs            | TTL for classification result caches in worker memory. Defaults to 300000. |
+| nip50.classification.cache.maxEntries       | Maximum entries kept in worker classification caches. Defaults to 5000. |
+| nip50.classification.gating.lowThreshold    | Lower confidence bound for model routing. Defaults to 0.4. |
+| nip50.classification.gating.highThreshold   | Upper confidence bound for model routing. Defaults to 0.85. |
+| nip50.classification.slo.maxWorkerCpuPercent| Worker CPU pressure guardrail that disables model stage when exceeded. Defaults to 85. |
 | paymentProcessors.lnbits.baseURL            | Base URL of your Lnbits instance. |
 | paymentProcessors.lnbits.callbackBaseURL    | Public-facing Nostream's Lnbits Callback URL. (e.g. https://relay.your-domain.com/callbacks/lnbits) |
 | paymentProcessors.lnurl.invoiceURL          | [LUD-06 Pay Request](https://github.com/lnurl/luds/blob/luds/06.md) provider URL. (e.g. https://getalby.com/lnurlp/your-username) |

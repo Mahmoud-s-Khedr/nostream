@@ -78,6 +78,15 @@ After(async function () {
       ),
     )
     .delete()
+
+  await dbClient('nip05_verifications')
+    .whereIn(
+      'pubkey',
+      Object.values(this.parameters.identities as Record<string, { pubkey: string }>).map(({ pubkey }) =>
+        Buffer.from(pubkey, 'hex'),
+      ),
+    )
+    .delete()
   this.parameters.identities = {}
 })
 

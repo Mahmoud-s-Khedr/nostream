@@ -21,6 +21,7 @@ const UPDATE_INVOICE_INTERVAL = 60000
 const NIP05_REVERIFICATION_BATCH_SIZE = 50
 const SEARCH_CLASSIFICATION_BATCH_SIZE = 200
 const CLEAR_OLD_EVENTS_TIMEOUT_MS = 5000
+const SEARCH_CLASSIFICATION_MAX_RETRIES = 3
 
 const logger = createLogger('maintenance-worker')
 
@@ -271,7 +272,7 @@ export class MaintenanceWorker implements IRunnable {
           spamTrue: 0,
         },
       )
-      await this.searchMetadataRepository.upsertMany(metadata)
+      await this.upsertSearchMetadataWithRetry(metadata)
       logger(
         'search classification summary: total=%d language=%d sentiment={+:%d,-:%d,0:%d} nsfw=%d spam=%d',
         metadata.length,
@@ -284,6 +285,37 @@ export class MaintenanceWorker implements IRunnable {
       )
     } catch (error) {
       logger('search classification batch failed: %o', error)
+    }
+  }
+
+  private async upsertSearchMetadataWithRetry(metadata: ReturnType<typeof classifySearchMetadata>[]): Promise<void> {
+    for (let attempt = 1; attempt <= SEARCH_CLASSIFICATION_MAX_RETRIES; attempt++) {
+      try {
+        await this.searchMetadataRepository.upsertMany(metadata)
+        return
+      } catch (error) {
+        if (attempt === SEARCH_CLASSIFICATION_MAX_RETRIES) {
+          logger('search metadata batch upsert failed after %d attempts: %o', attempt, error)
+          break
+        }
+        logger('search metadata batch upsert attempt %d failed; retrying: %o', attempt, error)
+        await delayMs(150 * attempt)
+      }
+    }
+
+    for (const item of metadata) {
+      for (let attempt = 1; attempt <= SEARCH_CLASSIFICATION_MAX_RETRIES; attempt++) {
+        try {
+          await this.searchMetadataRepository.upsert(item)
+          break
+        } catch (error) {
+          if (attempt === SEARCH_CLASSIFICATION_MAX_RETRIES) {
+            logger('search metadata upsert failed for event %s after %d attempts: %o', item.eventId, attempt, error)
+          } else {
+            await delayMs(100 * attempt)
+          }
+        }
+      }
     }
   }
 

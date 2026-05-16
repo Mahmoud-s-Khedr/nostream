@@ -269,12 +269,36 @@ export class EventRepository implements IEventRepository {
     }
 
     if (textQuery.length) {
+      const rankingBoostFragments: string[] = []
+      const rankingBoostParams: Array<string | boolean> = []
+
+      // Optional boosts to improve deterministic ranking quality for extension-aware queries.
+      if (parsed.extensions.language) {
+        rankingBoostFragments.push('CASE WHEN event_search_metadata.language = ? THEN 0.03 ELSE 0 END')
+        rankingBoostParams.push(parsed.extensions.language)
+      }
+      if (parsed.extensions.sentiment) {
+        rankingBoostFragments.push('CASE WHEN event_search_metadata.sentiment = ? THEN 0.03 ELSE 0 END')
+        rankingBoostParams.push(parsed.extensions.sentiment)
+      }
+      if (typeof parsed.extensions.nsfw === 'boolean') {
+        rankingBoostFragments.push('CASE WHEN event_search_metadata.nsfw = ? THEN 0.02 ELSE 0 END')
+        rankingBoostParams.push(parsed.extensions.nsfw)
+      }
+      // Prefer verified NIP-05 users when domain extension is not requested.
+      if (!parsed.extensions.domain) {
+        builder.leftJoin('nip05_verifications as nip05_rank', 'events.event_pubkey', 'nip05_rank.pubkey')
+        rankingBoostFragments.push('CASE WHEN nip05_rank.is_verified = true THEN 0.04 ELSE 0 END')
+      }
+
+      const rankingBoostSql = rankingBoostFragments.length > 0 ? ` + (${rankingBoostFragments.join(' + ')})` : ''
+
       builder
         .andWhereRaw("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', ?)", [textQuery])
         .select(
           this.readReplicaDbClient.raw(
-            "ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?)) as search_rank",
-            [textQuery],
+            `ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?))${rankingBoostSql} as search_rank`,
+            [textQuery, ...rankingBoostParams],
           ),
         )
     } else {

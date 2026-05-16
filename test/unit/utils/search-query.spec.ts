@@ -19,10 +19,17 @@ describe('search-query', () => {
       })
     })
 
-    it('keeps malformed tokens in free text', () => {
+    it('ignores malformed known extension tokens', () => {
       const parsed = parseSearchQuery('hello language:english sentiment:meh nsfw:nope')
 
-      expect(parsed.text).to.equal('hello language:english sentiment:meh nsfw:nope')
+      expect(parsed.text).to.equal('hello')
+      expect(parsed.extensions).to.deep.equal({ includeSpam: false })
+    })
+
+    it('ignores unknown key:value tokens', () => {
+      const parsed = parseSearchQuery('best nostr apps custom:token mode:strict')
+
+      expect(parsed.text).to.equal('best nostr apps')
       expect(parsed.extensions).to.deep.equal({ includeSpam: false })
     })
 

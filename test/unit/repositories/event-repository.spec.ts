@@ -312,6 +312,15 @@ describe('EventRepository', () => {
           expect(query).to.include('"event_search_metadata"."nsfw" = false')
           expect(query).to.not.include('"event_search_metadata"."is_spam" = false')
         })
+
+        it('ignores unknown key:value extension tokens from search text', () => {
+          const filters = [{ search: 'nostr apps custom:token mode:strict' }]
+
+          const query = repository.findByFilters(filters).toString()
+
+          expect(query).to.include("websearch_to_tsquery('simple', 'nostr apps')")
+          expect(query).to.not.include("websearch_to_tsquery('simple', 'nostr apps custom:token mode:strict')")
+        })
       })
 
       describe('#e', () => {

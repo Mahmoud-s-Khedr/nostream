@@ -12,6 +12,11 @@ import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard
 import { SubscriptionFilter } from '../@types/subscription'
 import { WebSocketServerAdapterEvent } from '../constants/adapter'
 import { parseSearchQuery } from './search-query'
+import { SearchMetadata } from '../@types/search'
+
+interface EventFilterContext {
+  searchMetadata?: Pick<SearchMetadata, 'language' | 'sentiment' | 'nsfw' | 'isSpam'>
+}
 
 export const serializeEvent = (event: UnidentifiedEvent): CanonicalEvent => [
   0,
@@ -38,7 +43,7 @@ export const isEventKindOrRangeMatch =
     typeof item === 'number' ? item === kind : kind >= item[0] && kind <= item[1]
 
 export const isEventMatchingFilter =
-  (filter: SubscriptionFilter) =>
+  (filter: SubscriptionFilter, context?: EventFilterContext) =>
   (event: Event): boolean => {
     const startsWith = (input: string) => (prefix: string) => input.startsWith(prefix)
     const isMatchingGenericTagCriterion = (key: string, criterion: string) => (tag: Tag): boolean => {
@@ -105,17 +110,27 @@ export const isEventMatchingFilter =
 
     if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
       const parsed = parseSearchQuery(filter.search)
-      const hasUnsupportedLiveExtensions =
+      const hasSearchExtensions =
         parsed.extensions.includeSpam ||
         typeof parsed.extensions.domain === 'string' ||
         typeof parsed.extensions.language === 'string' ||
         typeof parsed.extensions.sentiment === 'string' ||
         typeof parsed.extensions.nsfw === 'boolean'
 
-      // Live broadcast filtering has no access to DB-backed search metadata.
-      // To avoid false positives, only text-only search is evaluated in-memory.
-      if (hasUnsupportedLiveExtensions) {
-        return false
+      const metadata = context?.searchMetadata
+      if (hasSearchExtensions && metadata) {
+        if (!parsed.extensions.includeSpam && metadata.isSpam) {
+          return false
+        }
+        if (parsed.extensions.language && metadata.language !== parsed.extensions.language) {
+          return false
+        }
+        if (parsed.extensions.sentiment && metadata.sentiment !== parsed.extensions.sentiment) {
+          return false
+        }
+        if (typeof parsed.extensions.nsfw === 'boolean' && metadata.nsfw !== parsed.extensions.nsfw) {
+          return false
+        }
       }
 
       const terms = parsed.text

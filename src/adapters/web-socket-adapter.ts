@@ -110,8 +110,9 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   }
 
   public onSendEvent(event: Event): void {
+    const eventSearchMetadata = (event as any).searchMetadata
     this.subscriptions.forEach((filters, subscriptionId) => {
-      if (filters.map(isEventMatchingFilter).some((isMatch) => isMatch(event))) {
+      if (filters.map((filter) => isEventMatchingFilter(filter, { searchMetadata: eventSearchMetadata })).some((isMatch) => isMatch(event))) {
         logger('sending event to client %s: %o', this.clientId, event)
         this.sendMessage(createOutgoingEventMessage(subscriptionId, event))
       }

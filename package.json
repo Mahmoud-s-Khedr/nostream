@@ -27,7 +27,13 @@
     50,
     65
   ],
-  "supportedNipExtensions": [],
+  "supportedNipExtensions": [
+    "include:spam",
+    "domain:<domain>",
+    "language:<iso-639-1>",
+    "sentiment:<negative|neutral|positive>",
+    "nsfw:<true|false>"
+  ],
   "supportedMips": [0, 1, 2, 3],
   "main": "src/index.ts",
   "bin": {

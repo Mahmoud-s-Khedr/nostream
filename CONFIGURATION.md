@@ -57,6 +57,7 @@ The following environment variables can be set:
 | NOSTR_CONFIG_DIR                 | Configuration directory          | <project_root>/.nostr/ |
 | DEBUG                            | Debugging filter                 |                        |
 | NOSTREAM_MAX_CLASSIFIER_CONTENT_LENGTH | Max chars used by search metadata classifier | 20000 |
+| NOSTREAM_SEARCH_MODEL_MIN_CONFIDENCE | Min confidence required to keep model classification result | 0.6 |
 | ZEBEDEE_API_KEY                  | Zebedee Project API Key          |                        |
 | NWC_URL                          | NWC connection URL (`nostr+walletconnect://...`) | |
 

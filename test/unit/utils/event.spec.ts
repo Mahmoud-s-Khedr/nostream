@@ -214,8 +214,37 @@ describe('NIP-01', () => {
         expect(isEventMatchingFilter({ search: 'mirroring bitcoin' })(event)).to.be.false
       })
 
-      it('returns false for extension-based search in live in-memory matching', () => {
-        expect(isEventMatchingFilter({ search: 'mirroring language:en' })(event)).to.be.false
+      it('returns true for extension-based search when metadata is unavailable and text matches', () => {
+        expect(isEventMatchingFilter({ search: 'mirroring language:en' })(event)).to.be.true
+      })
+
+      it('applies extension checks in-memory when metadata is available', () => {
+        expect(
+          isEventMatchingFilter(
+            { search: 'mirroring language:en sentiment:positive nsfw:false' },
+            {
+              searchMetadata: {
+                language: 'en',
+                sentiment: 'positive',
+                nsfw: false,
+                isSpam: false,
+              },
+            },
+          )(event),
+        ).to.be.true
+        expect(
+          isEventMatchingFilter(
+            { search: 'mirroring language:en sentiment:positive nsfw:false' },
+            {
+              searchMetadata: {
+                language: 'fr',
+                sentiment: 'positive',
+                nsfw: false,
+                isSpam: false,
+              },
+            },
+          )(event),
+        ).to.be.false
       })
     })
   })

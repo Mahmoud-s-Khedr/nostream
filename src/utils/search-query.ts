@@ -45,8 +45,11 @@ export const parseSearchQuery = (query: string): ParsedSearchQuery => {
     const key = token.slice(0, sep).toLowerCase()
     const value = token.slice(sep + 1)
 
-    if (key === 'include' && value.toLowerCase() === 'spam') {
-      extensions.includeSpam = true
+    if (key === 'include') {
+      if (value.toLowerCase() === 'spam') {
+        extensions.includeSpam = true
+      }
+      // Known extension key with unsupported value: ignore token.
       continue
     }
 
@@ -55,8 +58,11 @@ export const parseSearchQuery = (query: string): ParsedSearchQuery => {
       continue
     }
 
-    if (key === 'language' && isIso639_1(value)) {
-      extensions.language = value.toLowerCase()
+    if (key === 'language') {
+      if (isIso639_1(value)) {
+        extensions.language = value.toLowerCase()
+      }
+      // Known extension key with unsupported value: ignore token.
       continue
     }
 
@@ -64,19 +70,22 @@ export const parseSearchQuery = (query: string): ParsedSearchQuery => {
       const sentiment = toSentiment(value)
       if (sentiment) {
         extensions.sentiment = sentiment
-        continue
       }
+      // Known extension key with unsupported value: ignore token.
+      continue
     }
 
     if (key === 'nsfw') {
       const nsfw = toBoolean(value)
       if (typeof nsfw === 'boolean') {
         extensions.nsfw = nsfw
-        continue
       }
+      // Known extension key with unsupported value: ignore token.
+      continue
     }
 
-    textTokens.push(token)
+    // Unknown key:value extension is ignored per NIP-50.
+    continue
   }
 
   return {

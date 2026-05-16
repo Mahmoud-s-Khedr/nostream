@@ -290,6 +290,25 @@ describe('WebSocketAdapter', () => {
 
       expect(client.send).not.to.have.been.called
     })
+
+    it('sends live event for extension-based search when metadata is unavailable', () => {
+      client.readyState = WebSocket.OPEN
+      adapter.onSubscribed('sub-1', [{ kinds: [1], search: 'hello language:en' }])
+
+      const event = {
+        id: 'a'.repeat(64),
+        pubkey: 'b'.repeat(64),
+        kind: 1,
+        content: 'hello from nostream',
+        created_at: 1000000,
+        sig: 'c'.repeat(128),
+        tags: [],
+      }
+
+      adapter.emit(WebSocketAdapterEvent.Event, event)
+
+      expect(client.send).to.have.been.calledOnce
+    })
   })
 
   describe('onClientClose', () => {

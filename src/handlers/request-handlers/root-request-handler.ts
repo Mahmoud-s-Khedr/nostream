@@ -74,6 +74,16 @@ export const rootRequestHandler = (request: Request, response: Response, next: N
     const supportedNips = searchEnabled
       ? packageJson.supportedNips
       : packageJson.supportedNips.filter((nip) => nip !== 50)
+    const nip50Extensions = [
+      'include:spam',
+      'domain:<domain>',
+      'language:<iso-639-1>',
+      'sentiment:<negative|neutral|positive>',
+      'nsfw:<true|false>',
+    ]
+    const supportedNipExtensions = searchEnabled
+      ? packageJson.supportedNipExtensions
+      : packageJson.supportedNipExtensions.filter((entry) => !nip50Extensions.includes(entry))
 
     const relayInformationDocument = {
       name,
@@ -84,7 +94,7 @@ export const rootRequestHandler = (request: Request, response: Response, next: N
       ...(self !== undefined ? { self } : {}),
       contact,
       supported_nips: supportedNips,
-      supported_nip_extensions: packageJson.supportedNipExtensions,
+      supported_nip_extensions: supportedNipExtensions,
       supported_mips: packageJson.supportedMips,
       software: packageJson.repository.url,
       version: packageJson.version,

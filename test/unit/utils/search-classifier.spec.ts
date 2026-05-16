@@ -7,9 +7,14 @@ describe('search-classifier', () => {
     const metadata = classifySearchMetadata('a'.repeat(64), null as any)
 
     expect(metadata.language).to.equal(null)
+    expect(metadata.languageConfidence).to.be.a('number')
     expect(metadata.sentiment).to.equal('neutral')
+    expect(metadata.sentimentConfidence).to.be.a('number')
     expect(metadata.nsfw).to.equal(false)
+    expect(metadata.nsfwConfidence).to.be.a('number')
     expect(metadata.isSpam).to.equal(false)
+    expect(metadata.spamConfidence).to.be.a('number')
+    expect(metadata.classifierSource).to.be.oneOf(['heuristic', 'model'])
   })
 
   it('truncates oversized content before classification', () => {
@@ -17,6 +22,7 @@ describe('search-classifier', () => {
 
     expect(metadata.sentiment).to.equal('positive')
     expect(metadata.isSpam).to.equal(false)
+    expect(metadata.classifierVersion).to.be.a('string')
   })
 
   it('respects NOSTREAM_MAX_CLASSIFIER_CONTENT_LENGTH when module is loaded', () => {
@@ -30,11 +36,32 @@ describe('search-classifier', () => {
 
     expect(metadata.sentiment).to.equal('positive')
     expect(metadata.isSpam).to.equal(false)
+    expect(metadata.classifierSource).to.be.oneOf(['heuristic', 'model'])
 
     if (previous === undefined) {
       delete process.env.NOSTREAM_MAX_CLASSIFIER_CONTENT_LENGTH
     } else {
       process.env.NOSTREAM_MAX_CLASSIFIER_CONTENT_LENGTH = previous
+    }
+
+    delete require.cache[modulePath]
+  })
+
+  it('falls back to heuristic classifier when model confidence threshold is too high', () => {
+    const previousThreshold = process.env.NOSTREAM_SEARCH_MODEL_MIN_CONFIDENCE
+    process.env.NOSTREAM_SEARCH_MODEL_MIN_CONFIDENCE = '0.9999'
+
+    const modulePath = require.resolve('../../../src/utils/search-classifier')
+    delete require.cache[modulePath]
+    const mod = require('../../../src/utils/search-classifier') as typeof import('../../../src/utils/search-classifier')
+    const metadata = mod.classifySearchMetadata('d'.repeat(64), 'the awesome giveaway')
+
+    expect(metadata.classifierSource).to.equal('heuristic')
+
+    if (previousThreshold === undefined) {
+      delete process.env.NOSTREAM_SEARCH_MODEL_MIN_CONFIDENCE
+    } else {
+      process.env.NOSTREAM_SEARCH_MODEL_MIN_CONFIDENCE = previousThreshold
     }
 
     delete require.cache[modulePath]

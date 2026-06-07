@@ -268,6 +268,19 @@ describe('SubscribeMessageHandler', () => {
 
       expect((SubscribeMessageHandler as any).isClientSubscribedToEvent(filters)(event)).to.be.true
     })
+
+    it('ignores search text matching for backfill events and only enforces non-search predicates', () => {
+      const filters: SubscriptionFilter[] = [{ kinds: [1], authors: ['aa'], search: '"orange juice"' }]
+      const event: Event = {
+        id: 'bb',
+        kind: 1,
+        pubkey: 'aa11',
+        tags: [],
+        content: 'does not include phrase',
+      } as any
+
+      expect((SubscribeMessageHandler as any).isClientSubscribedToEvent(filters)(event)).to.be.true
+    })
   })
 
   describe('#canSubscribe', () => {
@@ -412,6 +425,17 @@ describe('SubscribeMessageHandler', () => {
       })
 
       expect((handler as any).canSubscribe('123456', filters)).to.be.undefined
+    })
+
+    it('returns reason if NIP-50 search is disabled and search filter is present', () => {
+      settingsFactory.returns({
+        nip50: { enabled: false },
+      })
+      filters = [{ search: 'nostr' }]
+
+      expect((handler as any).canSubscribe(subscriptionId, filters)).to.equal(
+        'NIP-50 search is disabled by relay configuration',
+      )
     })
   })
 })

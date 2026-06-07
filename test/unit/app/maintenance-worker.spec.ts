@@ -27,6 +27,7 @@ describe('MaintenanceWorker', () => {
   let settings: Sinon.SinonStub
   let settingsState: Settings
   let nip05VerificationRepository: any
+  let searchMetadataRepository: any
   let verifyStub: Sinon.SinonStub
 
   const pendingInvoice = {
@@ -55,6 +56,12 @@ describe('MaintenanceWorker', () => {
       upsert: sandbox.stub().resolves(1),
       deleteByPubkey: sandbox.stub(),
       findPendingVerifications: sandbox.stub().resolves([]),
+    }
+    searchMetadataRepository = {
+      findUnclassifiedEvents: sandbox.stub().resolves([]),
+      upsertMany: sandbox.stub().resolves(0),
+      upsert: sandbox.stub().resolves(1),
+      findByEventId: sandbox.stub(),
     }
 
     verifyStub = sandbox.stub(nip05Utils, 'verifyNip05Identifier')
@@ -99,6 +106,7 @@ describe('MaintenanceWorker', () => {
       maintenanceService,
       settings as any,
       nip05VerificationRepository,
+      searchMetadataRepository,
     )
   })
 

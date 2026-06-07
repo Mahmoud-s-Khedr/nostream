@@ -205,6 +205,37 @@ describe('rootRequestHandler', () => {
       const restrictedDoc = res.send.firstCall.args[0]
       expect(restrictedDoc.limitation.restricted_writes).to.equal(true)
     })
+
+    it('omits NIP-50 from supported_nips when nip50.enabled is false', () => {
+      createSettingsStub.returns({
+        ...baseSettings,
+        nip50: { enabled: false },
+      })
+
+      rootRequestHandler(req, res, next)
+
+      const doc = res.send.firstCall.args[0]
+      expect(doc.supported_nips).to.not.include(50)
+    })
+
+    it('does not advertise NIP-50 extensions when nip50 is enabled', () => {
+      rootRequestHandler(req, res, next)
+
+      const doc = res.send.firstCall.args[0]
+      expect(doc.supported_nip_extensions).to.deep.equal([])
+    })
+
+    it('does not advertise NIP-50 extensions when nip50 is disabled', () => {
+      createSettingsStub.returns({
+        ...baseSettings,
+        nip50: { enabled: false },
+      })
+
+      rootRequestHandler(req, res, next)
+
+      const doc = res.send.firstCall.args[0]
+      expect(doc.supported_nip_extensions).to.deep.equal([])
+    })
   })
 
   describe('when serving HTML', () => {

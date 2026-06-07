@@ -119,7 +119,7 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
 
   public onSendEvent(event: Event): void {
     this.subscriptions.forEach((filters, subscriptionId) => {
-      if (filters.map(isEventMatchingFilter).some((isMatch) => isMatch(event))) {
+      if (filters.some((filter) => isEventMatchingFilter(filter)(event))) {
         logger('sending event to client %s: %o', this.clientId, event)
         this.sendMessage(createOutgoingEventMessage(subscriptionId, event))
       }

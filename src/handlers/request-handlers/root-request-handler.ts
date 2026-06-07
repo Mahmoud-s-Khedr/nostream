@@ -70,6 +70,11 @@ export const rootRequestHandler = (request: Request, response: Response, next: N
     const pubkey = rawPubkey.startsWith('npub1') ? fromBech32(rawPubkey) : rawPubkey
     const self = rawSelf?.startsWith('npub1') ? fromBech32(rawSelf) : rawSelf
 
+    const searchEnabled = settings.nip50?.enabled ?? true
+    const supportedNips = searchEnabled
+      ? packageJson.supportedNips
+      : packageJson.supportedNips.filter((nip) => nip !== 50)
+
     const relayInformationDocument = {
       name,
       description,
@@ -78,7 +83,7 @@ export const rootRequestHandler = (request: Request, response: Response, next: N
       pubkey,
       ...(self !== undefined ? { self } : {}),
       contact,
-      supported_nips: packageJson.supportedNips,
+      supported_nips: supportedNips,
       supported_nip_extensions: packageJson.supportedNipExtensions,
       supported_mips: packageJson.supportedMips,
       software: packageJson.repository.url,

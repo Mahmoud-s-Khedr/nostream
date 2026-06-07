@@ -1,4 +1,4 @@
-import { anyPass, equals, isNil, map, propSatisfies, uniqWith } from 'ramda'
+import { anyPass, equals, isNil, map, omit, propSatisfies, uniqWith } from 'ramda'
 // import { addAbortSignal } from 'stream'
 import { pipeline } from 'stream/promises'
 
@@ -92,16 +92,34 @@ export class SubscribeMessageHandler implements IMessageHandler, IAbortable {
   }
 
   private static isClientSubscribedToEvent(filters: SubscriptionFilter[]): (event: Event) => boolean {
-    return anyPass(map(isEventMatchingFilter)(filters))
+    // Stored/backfill REQ results already had `search` evaluated by DB query semantics (NIP-50).
+    // Do not re-apply text search matching in-memory here to avoid divergence from PostgreSQL FTS behavior.
+    // Live in-memory filtering still uses full filter matching in WebSocketAdapter.onSendEvent.
+    return anyPass(
+      filters.map((filter) => {
+        if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
+          return isEventMatchingFilter(omit(['search'], filter) as SubscriptionFilter)
+        }
+        return isEventMatchingFilter(filter)
+      }),
+    )
   }
 
   private canSubscribe(subscriptionId: SubscriptionId, filters: SubscriptionFilter[]): string | undefined {
     const subscriptions = this.webSocket.getSubscriptions()
     const existingSubscription = subscriptions.get(subscriptionId)
-    const subscriptionLimits = this.settings().limits?.client?.subscription
+    const currentSettings = this.settings()
+    const subscriptionLimits = currentSettings.limits?.client?.subscription
 
     if (existingSubscription?.length && equals(filters, existingSubscription)) {
       return `Duplicate subscription ${subscriptionId}: Ignoring`
+    }
+
+    if (
+      (currentSettings.nip50?.enabled ?? true) === false &&
+      filters.some((filter) => typeof filter.search === 'string' && filter.search.trim().length > 0)
+    ) {
+      return 'NIP-50 search is disabled by relay configuration'
     }
 
     const maxSubscriptions = subscriptionLimits?.maxSubscriptions ?? 0

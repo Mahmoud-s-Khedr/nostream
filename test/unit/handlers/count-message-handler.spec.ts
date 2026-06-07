@@ -144,5 +144,27 @@ describe('CountMessageHandler', () => {
         'COUNT is disabled by relay configuration',
       ])
     })
+
+    it('returns CLOSED when NIP-50 search is disabled and search filter is present', async () => {
+      handler = new CountMessageHandler(
+        webSocket,
+        eventRepository,
+        () =>
+          ({
+            nip50: { enabled: false },
+          }) as Settings,
+      )
+
+      const message = [MessageType.COUNT, 'q1', { search: 'nostr' }] as any
+
+      await handler.handleMessage(message)
+
+      expect(eventRepository.countByFilters).to.not.have.been.called
+      expect(webSocketOnMessageStub).to.have.been.calledOnceWithExactly([
+        MessageType.CLOSED,
+        'q1',
+        'NIP-50 search is disabled by relay configuration',
+      ])
+    })
   })
 })

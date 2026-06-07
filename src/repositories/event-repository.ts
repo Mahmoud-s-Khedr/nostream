@@ -27,6 +27,7 @@ import { toBuffer, toJSON } from '../utils/transform'
 import { createLogger } from '../factories/logger-factory'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from '../utils/filter'
 import { SubscriptionFilter } from '../@types/subscription'
+import { parseSearchQuery } from '../utils/search-query'
 
 const logger = createLogger('event-repository')
 const RETENTION_BATCH_SIZE = 1000
@@ -52,17 +53,28 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events')
 
-      const isTagQuery = this.applyFilterConditions(builder, currentFilter)
+      const { isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
-        builder.limit(currentFilter.limit).orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        builder.limit(currentFilter.limit)
       } else {
-        builder.limit(DEFAULT_FILTER_LIMIT).orderBy('event_created_at', 'asc').orderBy('event_id', 'asc')
+        builder.limit(DEFAULT_FILTER_LIMIT)
       }
 
-      if (isTagQuery) {
-        builder.select('events.*')
+      if (isSearchQuery) {
+        builder
+          .orderBy('search_rank', 'desc')
+          .orderBy('event_created_at', 'desc')
+          .orderBy('event_id', 'asc')
+      } else if (typeof currentFilter.limit === 'number') {
+        builder.orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+      } else {
+        builder.orderBy('event_created_at', 'asc').orderBy('event_id', 'asc')
       }
+
+      // Always project canonical event columns only, even for joined search/tag queries.
+      // This avoids row-shape ambiguity from SELECT * across multiple joined tables.
+      builder.select('events.*')
 
       return builder
     })
@@ -87,10 +99,18 @@ export class EventRepository implements IEventRepository {
     const queries = filters.map((currentFilter) => {
       const builder = this.readReplicaDbClient<DBEvent>('events').select('events.event_id')
 
-      const isTagQuery = this.applyFilterConditions(builder, currentFilter)
+      const { isTagQuery, isSearchQuery } = this.applyFilterConditions(builder, currentFilter)
 
       if (typeof currentFilter.limit === 'number') {
-        builder.limit(currentFilter.limit).orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        builder.limit(currentFilter.limit)
+        if (isSearchQuery) {
+          builder
+            .orderBy('search_rank', 'desc')
+            .orderBy('event_created_at', 'desc')
+            .orderBy('event_id', 'asc')
+        } else {
+          builder.orderBy('event_created_at', 'DESC').orderBy('event_id', 'asc')
+        }
       }
 
       if (isTagQuery) {
@@ -114,7 +134,7 @@ export class EventRepository implements IEventRepository {
     return Number(result?.count ?? 0)
   }
 
-  private applyFilterConditions(builder: any, currentFilter: SubscriptionFilter): boolean {
+  private applyFilterConditions(builder: any, currentFilter: SubscriptionFilter): { isTagQuery: boolean; isSearchQuery: boolean } {
     this.applyHexFilterConditions(builder, currentFilter)
 
     if (Array.isArray(currentFilter.kinds)) {
@@ -135,7 +155,32 @@ export class EventRepository implements IEventRepository {
       builder.leftJoin('event_tags', 'events.event_id', 'event_tags.event_id')
     }
 
-    return isTagQuery
+    const isSearchQuery = this.applySearchConditions(builder, currentFilter)
+
+    return { isTagQuery, isSearchQuery }
+  }
+
+  private applySearchConditions(builder: any, currentFilter: SubscriptionFilter): boolean {
+    if (typeof currentFilter.search !== 'string' || !currentFilter.search.trim()) {
+      return false
+    }
+
+    const { text: textQuery } = parseSearchQuery(currentFilter.search)
+
+    if (textQuery.length) {
+      builder
+        .andWhereRaw("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', ?)", [textQuery])
+        .select(
+          this.readReplicaDbClient.raw(
+            "ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?)) as search_rank",
+            [textQuery],
+          ),
+        )
+    } else {
+      builder.select(this.readReplicaDbClient.raw('1.0 as search_rank'))
+    }
+
+    return true
   }
 
   private applyHexFilterConditions(builder: any, currentFilter: SubscriptionFilter): void {

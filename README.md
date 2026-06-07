@@ -63,8 +63,20 @@ NIPs with a relay-specific implementation are listed here.
 - [x] NIP-40: Expiration Timestamp
 - [x] NIP-44: Encrypted Payloads (Versioned)
 - [x] NIP-45: Event Counts
+- [x] NIP-50: Search Capability
 - [x] NIP-62: Request to Vanish
 - [x] NIP-65: Relay List Metadata
+
+### NIP-50 Search
+
+This relay supports `search` in `REQ` filters:
+
+```json
+["REQ", "sub-id", { "kinds": [1], "search": "best nostr apps" }]
+```
+
+Search results are ranked by relevance score (not `created_at`) and `limit` is applied after ranking.  
+Set `nip50.enabled` to `false` to disable `search` handling and NIP-50 advertisement.
 
 ## Requirements
 

@@ -11,6 +11,7 @@ import { getLeadingZeroBits } from './proof-of-work'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from './filter'
 import { SubscriptionFilter } from '../@types/subscription'
 import { WebSocketServerAdapterEvent } from '../constants/adapter'
+import { parseSearchQuery } from './search-query'
 
 export const serializeEvent = (event: UnidentifiedEvent): CanonicalEvent => [
   0,
@@ -100,6 +101,19 @@ export const isEventMatchingFilter =
         })
     ) {
       return false
+    }
+
+    if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
+      const terms = parseSearchQuery(filter.search).text
+        .toLowerCase()
+        .split(/\s+/)
+        .map((term) => term.trim())
+        .filter(Boolean)
+      const content = event.content.toLowerCase()
+
+      if (!terms.every((term) => content.includes(term))) {
+        return false
+      }
     }
 
     return true

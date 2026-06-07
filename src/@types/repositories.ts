@@ -6,6 +6,7 @@ import { EventKinds } from '../constants/base'
 import { EventKindsRange } from './settings'
 import { Invoice } from './invoice'
 import { Nip05Verification } from './nip05'
+import { SearchMetadata } from './search'
 import { SubscriptionFilter } from './subscription'
 import { User } from './user'
 
@@ -62,4 +63,11 @@ export interface INip05VerificationRepository {
   upsert(verification: Nip05Verification): Promise<number>
   findPendingVerifications(updateFrequencyMs: number, maxFailures: number, limit: number): Promise<Nip05Verification[]>
   deleteByPubkey(pubkey: Pubkey): Promise<number>
+}
+
+export interface ISearchMetadataRepository {
+  upsert(metadata: SearchMetadata): Promise<number>
+  upsertMany(metadata: SearchMetadata[]): Promise<number>
+  findByEventId(eventId: EventId): Promise<SearchMetadata | undefined>
+  findUnclassifiedEvents(limit: number): Promise<Array<{ eventId: EventId; content: string; pubkey: Pubkey; kind: number }>>
 }

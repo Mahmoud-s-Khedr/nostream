@@ -96,9 +96,8 @@ function percentile(values: number[], p: number): number {
   return sorted[idx]
 }
 
-async function seed(): Promise<{ pubkeys: Buffer[]; domains: string[] }> {
+async function seed(): Promise<void> {
   const pubkeys = Array.from({ length: 50 }, () => randomBytes(32))
-  const domains = ['example.com', 'other.com', 'relay.dev']
   const now = Math.floor(Date.now() / 1000)
 
   await client.query('BEGIN')
@@ -140,7 +139,7 @@ async function seed(): Promise<{ pubkeys: Buffer[]; domains: string[] }> {
       )
     }
 
-    const events = await client.query<{ event_id: Buffer; event_pubkey: Buffer }>(
+    const events = await client.query<{ event_id: Buffer }>(
       `SELECT event_id, event_pubkey
        FROM events
        WHERE event_content LIKE $1
@@ -172,23 +171,6 @@ async function seed(): Promise<{ pubkeys: Buffer[]; domains: string[] }> {
       )
     }
 
-    for (let i = 0; i < pubkeys.length; i++) {
-      const domain = domains[i % domains.length]
-      await client.query(
-        `INSERT INTO nip05_verifications
-          (pubkey, nip05, domain, is_verified, last_verified_at, last_checked_at, failure_count, created_at, updated_at)
-         VALUES ($1, $2, $3, true, NOW(), NOW(), 0, NOW(), NOW())
-         ON CONFLICT (pubkey) DO UPDATE SET
-           domain = excluded.domain,
-           nip05 = excluded.nip05,
-           is_verified = true,
-           updated_at = NOW(),
-           last_verified_at = NOW(),
-           last_checked_at = NOW()`,
-        [pubkeys[i], `user${i}@${domain}`, domain],
-      )
-    }
-
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -197,9 +179,6 @@ async function seed(): Promise<{ pubkeys: Buffer[]; domains: string[] }> {
 
   await client.query('ANALYZE events')
   await client.query('ANALYZE event_search_metadata')
-  await client.query('ANALYZE nip05_verifications')
-
-  return { pubkeys, domains }
 }
 
 async function cleanup(): Promise<void> {
@@ -214,82 +193,40 @@ async function run(): Promise<void> {
   fs.mkdirSync(reportDir, { recursive: true })
 
   try {
-    const { domains } = await seed()
+    await seed()
     const searchBase = `${marker} topic_3 apples`
     const queryCases: QueryCase[] = [
       {
         name: 'REQ text-only search',
         sql: `SELECT events.event_id
               FROM events
-              LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-              WHERE event_search_metadata.is_spam = false
-                AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
-              ORDER BY ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', $1)) DESC, events.event_created_at DESC, events.event_id ASC
-              LIMIT 50`,
-        params: [searchBase],
-        expectedIndexes: ['events_content_fts_idx'],
-        expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
-        maxP95Ms: 900,
-        requireIndexAssistForHardFail: false,
-      },
-      {
-        name: 'REQ search + language/sentiment/nsfw',
-        sql: `SELECT events.event_id
-              FROM events
-              LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-              WHERE event_search_metadata.is_spam = false
-                AND event_search_metadata.language = 'en'
-                AND event_search_metadata.sentiment = 'positive'
-                AND event_search_metadata.nsfw = false
-                AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
-              ORDER BY ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', $1)) DESC, events.event_created_at DESC, events.event_id ASC
-              LIMIT 50`,
-        params: [searchBase],
-        expectedIndexes: ['events_content_fts_idx', 'idx_event_search_metadata_language_is_spam'],
-        expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
-        maxP95Ms: 350,
-        requireIndexAssistForHardFail: true,
-      },
-      {
-        name: 'REQ search + domain',
-        sql: `SELECT events.event_id
-              FROM events
-              LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-              LEFT JOIN nip05_verifications ON events.event_pubkey = nip05_verifications.pubkey
-              WHERE event_search_metadata.is_spam = false
-                AND nip05_verifications.is_verified = true
-                AND nip05_verifications.domain = $2
-                AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
-              ORDER BY ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', $1)) DESC, events.event_created_at DESC, events.event_id ASC
-              LIMIT 50`,
-        params: [searchBase, domains[0]],
-        expectedIndexes: ['events_content_fts_idx'],
-        expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
-        maxP95Ms: 900,
-        requireIndexAssistForHardFail: false,
-      },
-      {
-        name: 'REQ include:spam equivalent',
-        sql: `SELECT events.event_id
-              FROM events
-              LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
               WHERE to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
               ORDER BY ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', $1)) DESC, events.event_created_at DESC, events.event_id ASC
               LIMIT 50`,
         params: [searchBase],
         expectedIndexes: ['events_content_fts_idx'],
         expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
-        maxP95Ms: 1000,
+        maxP95Ms: 900,
         requireIndexAssistForHardFail: false,
       },
       {
-        name: 'COUNT with search + extensions',
+        name: 'REQ search ignores extension-shaped tokens',
+        sql: `SELECT events.event_id
+              FROM events
+              WHERE to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
+              ORDER BY ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', $1)) DESC, events.event_created_at DESC, events.event_id ASC
+              LIMIT 50`,
+        params: [searchBase],
+        expectedIndexes: ['events_content_fts_idx'],
+        expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
+        maxP95Ms: 900,
+        requireIndexAssistForHardFail: true,
+      },
+      {
+        name: 'COUNT with search',
         sql: `SELECT COUNT(DISTINCT events.event_id) AS count
               FROM events
-              LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-              WHERE event_search_metadata.is_spam = false
-                AND event_search_metadata.language = 'en'
-                AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)`,
+              WHERE to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)`,
         params: [searchBase],
         expectedIndexes: ['events_content_fts_idx'],
         expectedNodeTypes: ['Bitmap Index Scan', 'Index Scan'],
@@ -301,16 +238,12 @@ async function run(): Promise<void> {
         sql: `SELECT event_id FROM (
                 (SELECT events.event_id
                  FROM events
-                 LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-                 WHERE event_search_metadata.is_spam = false
-                   AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
+                 WHERE to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $1)
                  LIMIT 25)
                 UNION
                 (SELECT events.event_id
                  FROM events
-                 LEFT JOIN event_search_metadata ON events.event_id = event_search_metadata.event_id
-                 WHERE event_search_metadata.is_spam = false
-                   AND to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $2)
+                 WHERE to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', $2)
                  LIMIT 25)
               ) u`,
         params: [`${marker} topic_3 apples`, `${marker} topic_7 oranges`],

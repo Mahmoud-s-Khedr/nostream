@@ -72,25 +72,11 @@ NIPs with a relay-specific implementation are listed here.
 This relay supports `search` in `REQ` filters:
 
 ```json
-["REQ", "sub-id", { "kinds": [1], "search": "best nostr apps language:en sentiment:positive nsfw:false" }]
+["REQ", "sub-id", { "kinds": [1], "search": "best nostr apps" }]
 ```
 
-Supported extensions in the search query string:
-- `include:spam`
-- `domain:<domain>`
-- `language:<iso-639-1>`
-- `sentiment:<negative|neutral|positive>`
-- `nsfw:<true|false>`
-
 Search results are ranked by relevance score (not `created_at`) and `limit` is applied after ranking.  
-Search metadata (`language`, `sentiment`, `nsfw`, `is_spam`) is classified asynchronously, so freshly published events may take a short time to appear in search.
-By default, unclassified events are excluded from search until an `event_search_metadata` row exists with `is_spam=false`.
 Set `nip50.enabled` to `false` to disable `search` handling and NIP-50 advertisement.
-
-Classifier caveats:
-- `language`, `sentiment`, `nsfw`, and `is_spam` use a tiered classifier (heuristic-first, optional ONNX model for ambiguous cases).
-- Results may contain false positives/negatives and should not be treated as moderation policy by themselves.
-- Live extension-filtered subscriptions require stored metadata; events without metadata are suppressed until classification is available.
 
 ## Requirements
 

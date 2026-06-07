@@ -294,7 +294,7 @@ describe('WebSocketAdapter', () => {
       expect(client.send).not.to.have.been.called
     })
 
-    it('suppresses live event for extension-based search when metadata is unavailable', () => {
+    it('sends live event for extension-based search when text matches', () => {
       client.readyState = WebSocket.OPEN
       adapter.onSubscribed('sub-1', [{ kinds: [1], search: 'hello language:en' }])
 
@@ -310,10 +310,10 @@ describe('WebSocketAdapter', () => {
 
       adapter.emit(WebSocketAdapterEvent.Event, event)
 
-      expect(client.send).not.to.have.been.called
+      expect(client.send).to.have.been.calledOnce
     })
 
-    it('sends live event for extension-based search when metadata is available', () => {
+    it('does not require metadata for extension-shaped search tokens', () => {
       client.readyState = WebSocket.OPEN
       adapter.onSubscribed('sub-1', [{ kinds: [1], search: 'hello language:en' }])
 

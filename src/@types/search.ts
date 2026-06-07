@@ -35,15 +35,6 @@ export interface DBSearchMetadata {
   updated_at: Date
 }
 
-export interface SearchExtensions {
-  includeSpam: boolean
-  domain?: string
-  language?: string
-  sentiment?: SearchSentiment
-  nsfw?: boolean
-}
-
 export interface ParsedSearchQuery {
   text: string
-  extensions: SearchExtensions
 }

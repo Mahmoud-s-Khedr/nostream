@@ -184,7 +184,7 @@ Then('the supported_nips field does not include 50', function(this: World<Record
   expect(doc.supported_nips).to.not.include(50)
 })
 
-Then('the supported_nip_extensions field does not include include:spam', function(this: World<Record<string, any>>) {
+Then('the supported_nip_extensions field is empty', function(this: World<Record<string, any>>) {
   const doc = this.parameters.httpResponse.data
-  expect(doc.supported_nip_extensions).to.not.include('include:spam')
+  expect(doc.supported_nip_extensions).to.deep.equal([])
 })

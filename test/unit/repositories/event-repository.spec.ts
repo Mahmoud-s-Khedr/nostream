@@ -289,28 +289,24 @@ describe('EventRepository', () => {
       })
 
       describe('search', () => {
-        it('adds ranked full-text search ordering and default spam exclusion', () => {
+        it('adds ranked full-text search ordering without metadata joins', () => {
           const filters = [{ search: 'best nostr apps' }]
 
           const query = repository.findByFilters(filters).toString()
 
-          expect(query).to.include("left join \"event_search_metadata\"")
           expect(query).to.include("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', 'best nostr apps')")
-          expect(query).to.include('"event_search_metadata"."is_spam" = false')
+          expect(query).to.not.include("left join \"event_search_metadata\"")
           expect(query).to.include('order by "search_rank" desc, "event_created_at" desc, "event_id" asc')
         })
 
-        it('applies extension filters for domain/language/sentiment/nsfw/include:spam', () => {
+        it('ignores extension-shaped search tokens', () => {
           const filters = [{ search: 'hello domain:example.com language:en sentiment:positive nsfw:false include:spam' }]
 
           const query = repository.findByFilters(filters).toString()
 
-          expect(query).to.include("left join \"nip05_verifications\"")
-          expect(query).to.include('"nip05_verifications"."domain" = \'example.com\'')
-          expect(query).to.include('"event_search_metadata"."language" = \'en\'')
-          expect(query).to.include('"event_search_metadata"."sentiment" = \'positive\'')
-          expect(query).to.include('"event_search_metadata"."nsfw" = false')
-          expect(query).to.not.include('"event_search_metadata"."is_spam" = false')
+          expect(query).to.include("websearch_to_tsquery('simple', 'hello')")
+          expect(query).to.not.include("left join \"nip05_verifications\"")
+          expect(query).to.not.include("left join \"event_search_metadata\"")
         })
 
         it('ignores unknown key:value extension tokens from search text', () => {
@@ -548,7 +544,7 @@ describe('EventRepository', () => {
       expect(sql).to.include('event_tags.tag_value')
     })
 
-    it('joins search metadata for search filters', async () => {
+    it('uses text search for count filters without metadata joins', async () => {
       const fromStub = sandbox.stub(rrDbClient, 'from').returns({
         countDistinct: () => ({
           first: async () => ({ count: '1' }),
@@ -558,8 +554,8 @@ describe('EventRepository', () => {
       await repository.countByFilters([{ search: 'nostr apps' } as any])
 
       const sql = fromStub.firstCall.args[0].toString()
-      expect(sql).to.include('left join "event_search_metadata"')
       expect(sql).to.include("websearch_to_tsquery('simple', 'nostr apps')")
+      expect(sql).to.not.include('left join "event_search_metadata"')
     })
 
     it('applies limit ordering when a filter includes limit', async () => {

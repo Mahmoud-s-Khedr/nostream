@@ -218,18 +218,14 @@ describe('rootRequestHandler', () => {
       expect(doc.supported_nips).to.not.include(50)
     })
 
-    it('advertises NIP-50 extensions when nip50 is enabled', () => {
+    it('does not advertise NIP-50 extensions when nip50 is enabled', () => {
       rootRequestHandler(req, res, next)
 
       const doc = res.send.firstCall.args[0]
-      expect(doc.supported_nip_extensions).to.include('include:spam')
-      expect(doc.supported_nip_extensions).to.include('domain:<domain>')
-      expect(doc.supported_nip_extensions).to.include('language:<iso-639-1>')
-      expect(doc.supported_nip_extensions).to.include('sentiment:<negative|neutral|positive>')
-      expect(doc.supported_nip_extensions).to.include('nsfw:<true|false>')
+      expect(doc.supported_nip_extensions).to.deep.equal([])
     })
 
-    it('omits NIP-50 extensions when nip50 is disabled', () => {
+    it('does not advertise NIP-50 extensions when nip50 is disabled', () => {
       createSettingsStub.returns({
         ...baseSettings,
         nip50: { enabled: false },
@@ -238,8 +234,7 @@ describe('rootRequestHandler', () => {
       rootRequestHandler(req, res, next)
 
       const doc = res.send.firstCall.args[0]
-      expect(doc.supported_nip_extensions).to.not.include('include:spam')
-      expect(doc.supported_nip_extensions).to.not.include('domain:<domain>')
+      expect(doc.supported_nip_extensions).to.deep.equal([])
     })
   })
 

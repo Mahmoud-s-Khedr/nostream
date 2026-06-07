@@ -11,13 +11,7 @@ import { getLeadingZeroBits } from './proof-of-work'
 import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard } from './filter'
 import { SubscriptionFilter } from '../@types/subscription'
 import { WebSocketServerAdapterEvent } from '../constants/adapter'
-import { hasSearchExtensions, parseSearchQuery } from './search-query'
-import { SearchMetadata } from '../@types/search'
-
-interface EventFilterContext {
-  searchMetadata?: Pick<SearchMetadata, 'language' | 'sentiment' | 'nsfw' | 'isSpam'>
-  strictSearchExtensions?: boolean
-}
+import { parseSearchQuery } from './search-query'
 
 export const serializeEvent = (event: UnidentifiedEvent): CanonicalEvent => [
   0,
@@ -44,7 +38,7 @@ export const isEventKindOrRangeMatch =
     typeof item === 'number' ? item === kind : kind >= item[0] && kind <= item[1]
 
 export const isEventMatchingFilter =
-  (filter: SubscriptionFilter, context?: EventFilterContext) =>
+  (filter: SubscriptionFilter) =>
   (event: Event): boolean => {
     const startsWith = (input: string) => (prefix: string) => input.startsWith(prefix)
     const isMatchingGenericTagCriterion = (key: string, criterion: string) => (tag: Tag): boolean => {
@@ -110,29 +104,7 @@ export const isEventMatchingFilter =
     }
 
     if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
-      const parsed = parseSearchQuery(filter.search)
-      const hasExtensions = hasSearchExtensions(parsed.extensions)
-
-      const metadata = context?.searchMetadata
-      if (hasExtensions && context?.strictSearchExtensions && !metadata) {
-        return false
-      }
-      if (hasExtensions && metadata) {
-        if (!parsed.extensions.includeSpam && metadata.isSpam) {
-          return false
-        }
-        if (parsed.extensions.language && metadata.language !== parsed.extensions.language) {
-          return false
-        }
-        if (parsed.extensions.sentiment && metadata.sentiment !== parsed.extensions.sentiment) {
-          return false
-        }
-        if (typeof parsed.extensions.nsfw === 'boolean' && metadata.nsfw !== parsed.extensions.nsfw) {
-          return false
-        }
-      }
-
-      const terms = parsed.text
+      const terms = parseSearchQuery(filter.search).text
         .toLowerCase()
         .split(/\s+/)
         .map((term) => term.trim())

@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto'
 import cluster from 'cluster'
 import { EventEmitter } from 'stream'
 import { IncomingMessage as IncomingHttpMessage } from 'http'
@@ -5,7 +6,7 @@ import { WebSocket } from 'ws'
 import { ZodError } from 'zod'
 
 import { ContextMetadata, Factory } from '../@types/base'
-import { createNoticeMessage, createOutgoingEventMessage } from '../utils/messages'
+import { createAuthChallengeMessage, createNoticeMessage, createOutgoingEventMessage } from '../utils/messages'
 import { IAbortable, IMessageHandler } from '../@types/message-handlers'
 import { IncomingMessage, OutgoingMessage } from '../@types/messages'
 import { IWebSocketAdapter, IWebSocketServerAdapter } from '../@types/adapters'
@@ -21,7 +22,6 @@ import { isEventMatchingFilter } from '../utils/event'
 import { messageSchema } from '../schemas/message-schema'
 import { Settings } from '../@types/settings'
 import { SocketAddress } from 'net'
-import { hasSearchExtensions, parseSearchQuery } from '../utils/search-query'
 
 const logger = createLogger('web-socket-adapter')
 const debugHeartbeat = logger.extend('heartbeat')
@@ -33,7 +33,8 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   private clientAddress: SocketAddress
   private alive: boolean
   private subscriptions: Map<SubscriptionId, SubscriptionFilter[]>
-  private suppressedSearchEventsWithoutMetadata = 0
+  private readonly challenge: string
+  private readonly authenticatedPubkeys: Set<string>
 
   public constructor(
     private readonly client: WebSocket,
@@ -81,6 +82,11 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
       .on(WebSocketAdapterEvent.Message, this.sendMessage.bind(this))
 
     logger('client %s connected from %s', this.clientId, this.clientAddress.address)
+
+    // NIP-42
+    this.challenge = randomBytes(32).toString('base64url')
+    this.authenticatedPubkeys = new Set()
+    this.sendMessage(createAuthChallengeMessage(this.challenge))
   }
 
   public getClientId(): string {
@@ -112,27 +118,8 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   }
 
   public onSendEvent(event: Event): void {
-    const eventSearchMetadata = (event as any).searchMetadata
     this.subscriptions.forEach((filters, subscriptionId) => {
-      if (
-        filters.some((filter) => {
-          if (typeof filter.search === 'string' && filter.search.trim().length > 0) {
-            const parsed = parseSearchQuery(filter.search)
-            if (hasSearchExtensions(parsed.extensions) && !eventSearchMetadata) {
-              this.suppressedSearchEventsWithoutMetadata++
-              if (this.suppressedSearchEventsWithoutMetadata % 100 === 0) {
-                logger(
-                  'suppressed %d live search events due to missing metadata',
-                  this.suppressedSearchEventsWithoutMetadata,
-                )
-              }
-              return false
-            }
-          }
-
-          return isEventMatchingFilter(filter, { searchMetadata: eventSearchMetadata, strictSearchExtensions: true })(event)
-        })
-      ) {
+      if (filters.some((filter) => isEventMatchingFilter(filter)(event))) {
         logger('sending event to client %s: %o', this.clientId, event)
         this.sendMessage(createOutgoingEventMessage(subscriptionId, event))
       }
@@ -160,6 +147,19 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
 
   public getSubscriptions(): Map<string, SubscriptionFilter[]> {
     return new Map(this.subscriptions)
+  }
+
+  // NIP-42
+  public getChallenge(): string {
+    return this.challenge
+  }
+
+  public getAuthenticatedPubkeys(): ReadonlySet<string> {
+    return new Set(this.authenticatedPubkeys)
+  }
+
+  public addAuthenticatedPubkey(pubkey: string): void {
+    this.authenticatedPubkeys.add(pubkey)
   }
 
   private async onClientMessage(raw: Buffer) {
@@ -262,6 +262,7 @@ export class WebSocketAdapter extends EventEmitter implements IWebSocketAdapter 
   private onClientClose() {
     this.alive = false
     this.subscriptions.clear()
+    this.authenticatedPubkeys.clear()
 
     const handlers = abortableMessageHandlers.get(this.client)
     if (Array.isArray(handlers) && handlers.length) {

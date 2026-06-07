@@ -1,31 +1,16 @@
 import {
-  __,
   always,
   applySpec,
-  complement,
-  cond,
-  equals,
-  evolve,
-  filter,
-  forEach,
-  forEachObjIndexed,
-  groupBy,
   ifElse,
-  invoker,
   is,
-  isEmpty,
   isNil,
   map,
-  modulo,
-  nth,
   omit,
   path,
   paths,
   pipe,
   prop,
   propSatisfies,
-  T,
-  toPairs,
 } from 'ramda'
 
 import {
@@ -44,20 +29,15 @@ import { isGenericTagQuery, isGeohashPrefixCriterion, stripGeohashPrefixWildcard
 import { SubscriptionFilter } from '../@types/subscription'
 import { parseSearchQuery } from '../utils/search-query'
 
-const even = pipe(modulo(__, 2), equals(0))
-
-const groupByLengthSpec = groupBy<string, 'exact' | 'even' | 'odd'>(
-  pipe(
-    prop('length'),
-    cond([
-      [equals(64), always('exact')],
-      [even, always('even')],
-      [T, always('odd')],
-    ]),
-  ),
-)
-
 const logger = createLogger('event-repository')
+const RETENTION_BATCH_SIZE = 1000
+const SECONDS_PER_DAY = 86400
+
+type HexCriterionGroups = {
+  exact: string[]
+  even: string[]
+  odd: string[]
+}
 
 export class EventRepository implements IEventRepository {
   public constructor(
@@ -155,37 +135,7 @@ export class EventRepository implements IEventRepository {
   }
 
   private applyFilterConditions(builder: any, currentFilter: SubscriptionFilter): { isTagQuery: boolean; isSearchQuery: boolean } {
-    forEachObjIndexed((tableFields: string[], filterName: string | number) => {
-      builder.andWhere((bd) => {
-        cond([
-          [isEmpty, () => void bd.whereRaw('1 = 0')],
-          [
-            complement(isNil),
-            pipe(
-              groupByLengthSpec,
-              evolve({
-                exact: (pubkeys: string[]) =>
-                  tableFields.forEach((tableField) => bd.orWhereIn(tableField, pubkeys.map(toBuffer))),
-                even: forEach((prefix: string) =>
-                  tableFields.forEach((tableField) =>
-                    bd.orWhereRaw(`substring("${tableField}" from 1 for ?) = ?`, [prefix.length >> 1, toBuffer(prefix)]),
-                  ),
-                ),
-                odd: forEach((prefix: string) =>
-                  tableFields.forEach((tableField) =>
-                    bd.orWhereRaw(`substring("${tableField}" from 1 for ?) BETWEEN ? AND ?`, [
-                      (prefix.length >> 1) + 1,
-                      `\\x${prefix}0`,
-                      `\\x${prefix}f`,
-                    ]),
-                  ),
-                ),
-              } as any),
-            ),
-          ],
-        ])(currentFilter[filterName] as string[])
-      })
-    })({ authors: ['event_pubkey'], ids: ['event_id'] })
+    this.applyHexFilterConditions(builder, currentFilter)
 
     if (Array.isArray(currentFilter.kinds)) {
       builder.whereIn('event_kind', currentFilter.kinds)
@@ -199,40 +149,7 @@ export class EventRepository implements IEventRepository {
       builder.where('event_created_at', '<=', currentFilter.until)
     }
 
-    const andWhereRaw = invoker(1, 'andWhereRaw')
-    const orWhereRaw = invoker(2, 'orWhereRaw')
-
-    let isTagQuery = false
-    pipe(
-      toPairs,
-      filter(pipe(nth(0) as () => string, isGenericTagQuery)) as any,
-      forEach(([filterName, criteria]: [string, string[]]) => {
-        isTagQuery = true
-        builder.andWhere((bd) => {
-          ifElse(
-            isEmpty,
-            () => andWhereRaw('1 = 0', bd),
-            forEach(
-              (criterion: string) => {
-                if (isGeohashPrefixCriterion(filterName, criterion)) {
-                  return void orWhereRaw(
-                    'event_tags.tag_name = ? AND event_tags.tag_value LIKE ?',
-                    [filterName[1], `${stripGeohashPrefixWildcard(criterion)}%`],
-                    bd,
-                  )
-                }
-
-                return void orWhereRaw(
-                  'event_tags.tag_name = ? AND event_tags.tag_value = ?',
-                  [filterName[1], criterion],
-                  bd,
-                )
-              },
-            ),
-          )(criteria)
-        })
-      }),
-    )(currentFilter as any)
+    const isTagQuery = this.applyGenericTagFilterConditions(builder, currentFilter)
 
     if (isTagQuery) {
       builder.leftJoin('event_tags', 'events.event_id', 'event_tags.event_id')
@@ -248,65 +165,15 @@ export class EventRepository implements IEventRepository {
       return false
     }
 
-    const parsed = parseSearchQuery(currentFilter.search)
-    const textQuery = parsed.text
-
-    builder.leftJoin('event_search_metadata', 'events.event_id', 'event_search_metadata.event_id')
-
-    if (parsed.extensions.domain) {
-      builder
-        .leftJoin('nip05_verifications', 'events.event_pubkey', 'nip05_verifications.pubkey')
-        .where('nip05_verifications.is_verified', true)
-        .andWhere('nip05_verifications.domain', parsed.extensions.domain)
-    }
-
-    if (parsed.extensions.language) {
-      builder.andWhere('event_search_metadata.language', parsed.extensions.language)
-    }
-
-    if (parsed.extensions.sentiment) {
-      builder.andWhere('event_search_metadata.sentiment', parsed.extensions.sentiment)
-    }
-
-    if (typeof parsed.extensions.nsfw === 'boolean') {
-      builder.andWhere('event_search_metadata.nsfw', parsed.extensions.nsfw)
-    }
-
-    if (!parsed.extensions.includeSpam) {
-      builder.andWhere('event_search_metadata.is_spam', false)
-    }
+    const { text: textQuery } = parseSearchQuery(currentFilter.search)
 
     if (textQuery.length) {
-      const rankingBoostFragments: string[] = []
-      const rankingBoostParams: Array<string | boolean> = []
-
-      // Optional boosts to improve deterministic ranking quality for extension-aware queries.
-      if (parsed.extensions.language) {
-        rankingBoostFragments.push('CASE WHEN event_search_metadata.language = ? THEN 0.03 ELSE 0 END')
-        rankingBoostParams.push(parsed.extensions.language)
-      }
-      if (parsed.extensions.sentiment) {
-        rankingBoostFragments.push('CASE WHEN event_search_metadata.sentiment = ? THEN 0.03 ELSE 0 END')
-        rankingBoostParams.push(parsed.extensions.sentiment)
-      }
-      if (typeof parsed.extensions.nsfw === 'boolean') {
-        rankingBoostFragments.push('CASE WHEN event_search_metadata.nsfw = ? THEN 0.02 ELSE 0 END')
-        rankingBoostParams.push(parsed.extensions.nsfw)
-      }
-      // Prefer verified NIP-05 users when domain extension is not requested.
-      if (!parsed.extensions.domain) {
-        builder.leftJoin('nip05_verifications as nip05_rank', 'events.event_pubkey', 'nip05_rank.pubkey')
-        rankingBoostFragments.push('CASE WHEN nip05_rank.is_verified = true THEN 0.04 ELSE 0 END')
-      }
-
-      const rankingBoostSql = rankingBoostFragments.length > 0 ? ` + (${rankingBoostFragments.join(' + ')})` : ''
-
       builder
         .andWhereRaw("to_tsvector('simple', events.event_content) @@ websearch_to_tsquery('simple', ?)", [textQuery])
         .select(
           this.readReplicaDbClient.raw(
-            `ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?))${rankingBoostSql} as search_rank`,
-            [textQuery, ...rankingBoostParams],
+            "ts_rank_cd(to_tsvector('simple', events.event_content), websearch_to_tsquery('simple', ?)) as search_rank",
+            [textQuery],
           ),
         )
     } else {
@@ -314,6 +181,99 @@ export class EventRepository implements IEventRepository {
     }
 
     return true
+  }
+
+  private applyHexFilterConditions(builder: any, currentFilter: SubscriptionFilter): void {
+    builder.andWhere((bd) => {
+      this.applyHexCriteria(bd, ['event_pubkey'], currentFilter.authors)
+    })
+
+    builder.andWhere((bd) => {
+      this.applyHexCriteria(bd, ['event_id'], currentFilter.ids)
+    })
+  }
+
+  private applyHexCriteria(builder: any, tableFields: string[], criteria?: string[]): void {
+    if (typeof criteria === 'undefined') {
+      return
+    }
+
+    if (!criteria.length) {
+      builder.whereRaw('1 = 0')
+      return
+    }
+
+    const groups = this.groupHexCriteria(criteria)
+
+    tableFields.forEach((tableField) => {
+      if (groups.exact.length) {
+        builder.orWhereIn(tableField, groups.exact.map(toBuffer))
+      }
+
+      groups.even.forEach((prefix) => {
+        builder.orWhereRaw(`substring("${tableField}" from 1 for ?) = ?`, [prefix.length >> 1, toBuffer(prefix)])
+      })
+
+      groups.odd.forEach((prefix) => {
+        builder.orWhereRaw(`substring("${tableField}" from 1 for ?) BETWEEN ? AND ?`, [
+          (prefix.length >> 1) + 1,
+          `\\x${prefix}0`,
+          `\\x${prefix}f`,
+        ])
+      })
+    })
+  }
+
+  private groupHexCriteria(criteria: string[]): HexCriterionGroups {
+    return criteria.reduce<HexCriterionGroups>(
+      (groups, criterion) => {
+        if (criterion.length === 64) {
+          groups.exact.push(criterion)
+        } else if (criterion.length % 2 === 0) {
+          groups.even.push(criterion)
+        } else {
+          groups.odd.push(criterion)
+        }
+
+        return groups
+      },
+      {
+        exact: [],
+        even: [],
+        odd: [],
+      },
+    )
+  }
+
+  private applyGenericTagFilterConditions(builder: any, currentFilter: SubscriptionFilter): boolean {
+    const tagFilters = Object.entries(currentFilter).filter(([filterName]) => isGenericTagQuery(filterName))
+
+    tagFilters.forEach(([filterName, criteria]) => {
+      this.applyGenericTagCriteria(builder, filterName, criteria as string[])
+    })
+
+    return tagFilters.length > 0
+  }
+
+  private applyGenericTagCriteria(builder: any, filterName: string, criteria: string[]): void {
+    builder.andWhere((bd) => {
+      if (!criteria.length) {
+        bd.andWhereRaw('1 = 0')
+        return
+      }
+
+      criteria.forEach((criterion) => {
+        if (isGeohashPrefixCriterion(filterName, criterion)) {
+          bd.orWhereRaw('event_tags.tag_name = ? AND event_tags.tag_value LIKE ?', [
+            filterName[1],
+            `${stripGeohashPrefixWildcard(criterion)}%`,
+          ])
+          return
+        }
+
+        bd.orWhereRaw('event_tags.tag_name = ? AND event_tags.tag_value = ?', [filterName[1], criterion])
+      })
+    })
   }
 
   public async create(event: Event): Promise<number> {
@@ -498,83 +458,22 @@ export class EventRepository implements IEventRepository {
       })
     }
 
-    const retentionLimit = now - maxDays * 86400
-    const batchSize = 1000
+    const retentionLimit = now - maxDays * SECONDS_PER_DAY
 
     logger(
       'deleting expired and retained events (retentionLimit: %d, now: %d, batchSize: %d)',
       retentionLimit,
       now,
-      batchSize,
+      RETENTION_BATCH_SIZE,
     )
 
-    const kindWhitelist = [
-      ...(Array.isArray(options?.kindWhitelist) ? options.kindWhitelist : []),
-      EventKinds.REQUEST_TO_VANISH,
-    ].reduce<(number | [number, number])[]>((result, item) => {
-      const key = Array.isArray(item) ? `range:${item[0]}-${item[1]}` : `kind:${item}`
-
-      if (
-        !result.some((existing) => {
-          const existingKey = Array.isArray(existing) ? `range:${existing[0]}-${existing[1]}` : `kind:${existing}`
-          return existingKey === key
-        })
-      ) {
-        result.push(item)
-      }
-
-      return result
-    }, [])
-
-    const candidates = this.masterDbClient('events')
-      .select('event_id')
-      .where(function () {
-        this.where('expires_at', '<', now).orWhereNotNull('deleted_at').orWhere('event_created_at', '<', retentionLimit)
-      })
-      .modify((query) => {
-        query.whereNot((builder) => {
-          kindWhitelist.forEach((kindOrRange) => {
-            if (Array.isArray(kindOrRange)) {
-              builder.orWhereBetween('event_kind', kindOrRange)
-            } else {
-              builder.orWhere('event_kind', kindOrRange)
-            }
-          })
-        })
-
-        if (Array.isArray(options?.pubkeyWhitelist) && options.pubkeyWhitelist.length > 0) {
-          query.whereNotIn('event_pubkey', map(toBuffer)(options.pubkeyWhitelist))
-        }
-      })
-      .limit(batchSize)
+    const candidates = this.buildRetentionCandidateQuery(now, retentionLimit, options)
 
     const query = this.masterDbClient('events')
       .whereIn('event_id', candidates)
       .del(['deleted_at', 'expires_at', 'event_created_at'])
 
-    const mapToCounts = (
-      deletedRows: Pick<DBEvent, 'deleted_at' | 'expires_at' | 'event_created_at'>[],
-    ): EventPurgeCounts =>
-      deletedRows.reduce(
-        (counts, row) => {
-          if (row.deleted_at) {
-            counts.deleted += 1
-          } else if (typeof row.expires_at === 'number' && row.expires_at < now) {
-            counts.expired += 1
-          } else if (row.event_created_at < retentionLimit) {
-            counts.retained += 1
-          }
-
-          return counts
-        },
-        {
-          deleted: 0,
-          expired: 0,
-          retained: 0,
-        },
-      )
-
-    const getPromise = () => query.then((rows: any) => mapToCounts(rows))
+    const getPromise = () => query.then((rows: any) => this.mapToPurgeCounts(rows, now, retentionLimit))
 
     return {
       then: <T1, T2>(
@@ -585,5 +484,71 @@ export class EventRepository implements IEventRepository {
       finally: (onfinally?: (() => void) | null) => getPromise().finally(onfinally as any),
       toString: (): string => query.toString(),
     } as Promise<EventPurgeCounts> & { toString(): string }
+  }
+
+  private buildRetentionCandidateQuery(
+    now: number,
+    retentionLimit: number,
+    options?: EventRetentionOptions,
+  ): any {
+    return this.masterDbClient('events')
+      .select('event_id')
+      .where(function () {
+        this.where('expires_at', '<', now).orWhereNotNull('deleted_at').orWhere('event_created_at', '<', retentionLimit)
+      })
+      .modify((query) => {
+        this.applyRetentionKindWhitelist(query, options?.kindWhitelist)
+
+        if (Array.isArray(options?.pubkeyWhitelist) && options.pubkeyWhitelist.length > 0) {
+          query.whereNotIn('event_pubkey', map(toBuffer)(options.pubkeyWhitelist))
+        }
+      })
+      .limit(RETENTION_BATCH_SIZE)
+  }
+
+  private applyRetentionKindWhitelist(query: any, kindWhitelist?: EventRetentionOptions['kindWhitelist']): void {
+    const seen = new Set<string>()
+    const configuredWhitelist = Array.isArray(kindWhitelist) ? kindWhitelist : []
+    const dedupedWhitelist = [...configuredWhitelist, EventKinds.REQUEST_TO_VANISH].filter((item) => {
+      const key = Array.isArray(item) ? `range:${item[0]}-${item[1]}` : `kind:${item}`
+
+      if (seen.has(key)) {
+        return false
+      }
+
+      seen.add(key)
+      return true
+    })
+    query.whereNot((builder) => {
+      dedupedWhitelist.forEach((kindOrRange) => {
+        if (Array.isArray(kindOrRange)) {
+          builder.orWhereBetween('event_kind', kindOrRange)
+        } else {
+          builder.orWhere('event_kind', kindOrRange)
+        }
+      })
+    })
+  }
+
+  private mapToPurgeCounts(
+    deletedRows: Pick<DBEvent, 'deleted_at' | 'expires_at' | 'event_created_at'>[],
+    now: number,
+    retentionLimit: number,
+  ): EventPurgeCounts {
+    return deletedRows.reduce((counts, row) => {
+      if (row.deleted_at) {
+        counts.deleted += 1
+      } else if (typeof row.expires_at === 'number' && row.expires_at < now) {
+        counts.expired += 1
+      } else if (row.event_created_at < retentionLimit) {
+        counts.retained += 1
+      }
+
+      return counts
+    }, {
+      deleted: 0,
+      expired: 0,
+      retained: 0,
+    })
   }
 }
